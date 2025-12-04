@@ -19,6 +19,12 @@ label_loss_weight: 1.0
 min_gen_node_count: 5
 max_gen_node_count: 7
 
+constraints:
+  force_start_node: 'START'
+  start_node_weight: 1.0
+  force_end_node: 'END'
+  end_node_weight: 1.0
+
 # Training
 batch_size: 32
 test_batch_size: 32

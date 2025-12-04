@@ -11,6 +11,7 @@ from torch.optim.lr_scheduler import MultiStepLR
 from sklearn.decomposition import PCA
 import logging
 from torch.nn.utils.rnn import pad_packed_sequence, pack_padded_sequence
+from constraints import ConstraintManager, StartNodeConstraint
 from time import gmtime, strftime
 from sklearn.metrics import roc_curve
 from sklearn.metrics import roc_auc_score
@@ -431,10 +432,17 @@ def train_mlp_forward_epoch(epoch, args, rnn, output, data_loader):
 
 def train_rnn_epoch(epoch, args, rnn, output, data_loader,
                     optimizer_rnn, optimizer_output,
-                    scheduler_rnn, scheduler_output, label_embedding=None, label_head=None):
+                    scheduler_rnn, scheduler_output, label_embedding=None, label_head=None, **kwargs):
     rnn.train()
     output.train()
     loss_sum = 0
+    # Initialize Constraint Manager
+    constraint_manager = None
+    if 'id_to_label' in kwargs:
+        id_to_label = kwargs['id_to_label']
+        label_to_id = {v: k for k, v in id_to_label.items()}
+        constraint_manager = ConstraintManager(args.config, label_to_id)
+
     for batch_idx, data in enumerate(data_loader):
         rnn.zero_grad()
         output.zero_grad()
@@ -508,10 +516,25 @@ def train_rnn_epoch(epoch, args, rnn, output, data_loader,
         if label_head is not None:
             # h is (batch, len, hidden)
             # Pack h to match y_label packing
-            h_packed_for_label = pack_padded_sequence(h, y_len, batch_first=True).data
-            label_logits = label_head(h_packed_for_label)
+            packed_h = pack_padded_sequence(h, y_len, batch_first=True)
+            label_logits = label_head(packed_h.data)
             y_label_packed = pack_padded_sequence(y_label, y_len, batch_first=True).data
             label_loss = F.cross_entropy(label_logits, y_label_packed)
+            
+            # Constraint Loss
+            if constraint_manager:
+                start_idx = 0
+                # Iterate through packed sequence steps. 
+                # batch_sizes gives the number of active sequences at each time step.
+                for step, step_batch_size in enumerate(packed_h.batch_sizes):
+                    end_idx = start_idx + step_batch_size.item()
+                    step_logits = label_logits[start_idx:end_idx]
+                    
+                    # Compute constraint loss for the current step
+                    c_loss = constraint_manager.compute_loss(step_logits, None, step)
+                    label_loss += c_loss
+                    
+                    start_idx = end_idx
 
         h = pack_padded_sequence(h,y_len,batch_first=True).data # get packed hidden vector
         # reverse h
@@ -557,7 +580,7 @@ def train_rnn_epoch(epoch, args, rnn, output, data_loader,
 
 
 
-def test_rnn_epoch(epoch, args, rnn, output, test_batch_size=16, label_embedding=None, label_head=None):
+def test_rnn_epoch(epoch, args, rnn, output, test_batch_size=16, label_embedding=None, label_head=None, id_to_label=None):
     rnn.hidden = rnn.init_hidden(test_batch_size)
     rnn.eval()
     output.eval()
@@ -571,9 +594,6 @@ def test_rnn_epoch(epoch, args, rnn, output, test_batch_size=16, label_embedding
     if label_embedding is not None:
         # SOS token is num_node_labels (which is index 11 if we have 11 labels 0-10)
         # args.num_node_labels includes SOS, so if we have 11 labels, num_node_labels is 12.
-        # SOS index is args.num_node_labels - 1? 
-        # In data.py: self.sos_label = self.num_node_labels. 
-        # Wait, if num_node_labels is 12 (11 real + 1 SOS), then indices are 0..11.
         # SOS index is 11? No, in data.py I set self.sos_label = self.num_node_labels.
         # If I have 11 labels (0-10), num_node_labels is 11.
         # Then SOS is 11. So indices are 0..11. Total 12 embeddings needed.
@@ -593,6 +613,12 @@ def test_rnn_epoch(epoch, args, rnn, output, test_batch_size=16, label_embedding
         # Store predicted labels
         pred_labels = torch.zeros(test_batch_size, max_num_node).long()
         
+        # Initialize Constraint Manager
+        constraint_manager = None
+        if id_to_label:
+            label_to_id = {v: k for k, v in id_to_label.items()}
+            constraint_manager = ConstraintManager(args.config, label_to_id)
+        
     for i in range(max_num_node):
         
         if label_embedding is not None:
@@ -606,6 +632,14 @@ def test_rnn_epoch(epoch, args, rnn, output, test_batch_size=16, label_embedding
         # Predict label for this node (i)
         if label_head is not None:
             label_logits = label_head(h) # (batch, 1, num_classes)
+            
+            # Apply Constraint Masking
+            if constraint_manager:
+                # Squeeze to (batch, num_classes) for easier handling
+                logits_squeezed = label_logits.squeeze(1)
+                logits_masked = constraint_manager.apply_mask(logits_squeezed, i)
+                label_logits = logits_masked.unsqueeze(1)
+            
             # Sample label
             label_probs = F.softmax(label_logits, dim=2)
             # dist = torch.distributions.Categorical(label_probs.squeeze(1))
@@ -662,12 +696,30 @@ def test_rnn_epoch(epoch, args, rnn, output, test_batch_size=16, label_embedding
                 # G_pred nodes are 0-indexed based on the reduced adjacency
                 # So node 0 in G_pred corresponds to valid_idx[0] in original
                 if idx < G_pred.number_of_nodes():
+                    # Node 0 (if kept) doesn't have a predicted label from the loop
+                    # You might want to assign a default or SOS label
+                    # But wait, our loop in test_rnn_epoch runs for max_num_node steps.
+                    # Step 0 predicts label for Node 0?
+                    # No, let's look at the loop:
+                    # for i in range(max_num_node):
+                    #    pred_labels[:, i] = sampled_label
+                    # So pred_labels has length max_num_node.
+                    # Index i corresponds to the i-th node generated.
+                    # Node 0 is the first node generated.
+                    # So labels[0] is for Node 0.
+                    # labels[1] is for Node 1.
+                    # So we should use labels[node_idx].
+                    
+                    # Correct mapping considering decode_adj offset:
+                    # decode_adj introduces an extra node at index 0 (often isolated/implicit).
+                    # The generated sequence of length max_num_node corresponds to nodes 1..max_num_node.
                     if node_idx > 0:
-                        G_pred.nodes[idx]['label'] = int(labels[node_idx - 1])
+                        if (node_idx - 1) < len(labels):
+                            G_pred.nodes[idx]['label'] = int(labels[node_idx - 1])
                     else:
-                        # Node 0 (if kept) doesn't have a predicted label from the loop
-                        # You might want to assign a default or SOS label
-                        G_pred.nodes[idx]['label'] = 0 # or args.num_node_labels - 1
+                        # Handle the implicit start node (index 0).
+                        # Assign default label (0) as it's not part of the generated sequence.
+                        G_pred.nodes[idx]['label'] = 0
         
         G_pred_list.append(G_pred)
 
@@ -804,7 +856,7 @@ def train(args, dataset_train, rnn, output, label_embedding=None, label_head=Non
         elif 'GraphRNN_RNN' in args.note:
             train_rnn_epoch(epoch, args, rnn, output, dataset_train,
                             optimizer_rnn, optimizer_output,
-                            scheduler_rnn, scheduler_output, label_embedding, label_head)
+                            scheduler_rnn, scheduler_output, label_embedding=label_embedding, label_head=label_head, id_to_label=id_to_label)
         time_end = tm.time()
         time_all[epoch - 1] = time_end - time_start
         # test
@@ -817,7 +869,7 @@ def train(args, dataset_train, rnn, output, label_embedding=None, label_head=Non
                     elif 'GraphRNN_MLP' in args.note:
                         G_pred_step = test_mlp_epoch(epoch, args, rnn, output, test_batch_size=args.test_batch_size,sample_time=sample_time)
                     elif 'GraphRNN_RNN' in args.note:
-                        G_pred_step = test_rnn_epoch(epoch, args, rnn, output, test_batch_size=args.test_batch_size, label_embedding=label_embedding, label_head=label_head)
+                        G_pred_step = test_rnn_epoch(epoch, args, rnn, output, test_batch_size=args.test_batch_size, label_embedding=label_embedding, label_head=label_head, id_to_label=id_to_label)
                     
                     # Filter graphs
                     G_pred_step = [g for g in G_pred_step if args.min_gen_node_count <= g.number_of_nodes() <= args.max_gen_node_count]

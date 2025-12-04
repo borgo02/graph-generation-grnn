@@ -37,6 +37,7 @@ class Args():
                 # (Simple approach: just trust CLI args > config file values for explicitly passed args)
 
         # 3. Set attributes (Priority: CLI > Config > Defaults)
+        self.config = config
         # We use the parsed args directly for things exposed in CLI
         self.graph_type = args.graph_type
         self.epochs = args.epochs
