@@ -141,7 +141,10 @@ if __name__ == '__main__':
         label_head.cuda()
 
     ### start training
-    train(args, dataset_loader, rnn, output, label_embedding, label_head)
+    # Create id_to_label mapping
+    id_to_label = {v: k for k, v in dataset.label_to_id.items()}
+    
+    train(args, dataset_loader, rnn, output, label_embedding, label_head, id_to_label)
 
     ### graph completion
     # train_graph_completion(args,dataset_loader,rnn,output)

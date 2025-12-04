@@ -18,6 +18,8 @@ class Args():
         parser.add_argument('--epochs', type=int, default=config.get('epochs', 3000), help='Number of epochs')
         parser.add_argument('--cuda', action='store_true', default=config.get('cuda', False), help='Use CUDA')
         parser.add_argument('--note', type=str, default=config.get('note', 'GraphRNN_RNN'), help='Note')
+        parser.add_argument('--epochs_test', type=int, default=config.get('epochs_test', 100), help='Epochs test')
+        parser.add_argument('--epochs_test_start', type=int, default=config.get('epochs_test_start', 100), help='Epochs test start')
         
         # Parse args
         args, unknown = parser.parse_known_args()
@@ -35,6 +37,8 @@ class Args():
         self.epochs = args.epochs
         self.cuda = args.cuda
         self.note = args.note
+        self.epochs_test = args.epochs_test
+        self.epochs_test_start = args.epochs_test_start
         self.clean_tensorboard = config.get('clean_tensorboard', False)
 
         # 4. Set other attributes from config (or defaults if missing)
@@ -68,8 +72,6 @@ class Args():
         
         self.num_workers = config.get('num_workers', 4)
         self.batch_ratio = config.get('batch_ratio', 32)
-        self.epochs_test_start = config.get('epochs_test_start', 100)
-        self.epochs_test = config.get('epochs_test', 100)
         self.epochs_log = config.get('epochs_log', 100)
         self.epochs_save = config.get('epochs_save', 100)
         

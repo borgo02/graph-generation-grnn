@@ -557,7 +557,7 @@ def train_rnn_epoch(epoch, args, rnn, output, data_loader,
 
 
 
-def test_rnn_epoch(epoch, args, rnn, output, test_batch_size=16):
+def test_rnn_epoch(epoch, args, rnn, output, test_batch_size=16, label_embedding=None, label_head=None):
     rnn.hidden = rnn.init_hidden(test_batch_size)
     rnn.eval()
     output.eval()
@@ -566,8 +566,59 @@ def test_rnn_epoch(epoch, args, rnn, output, test_batch_size=16):
     max_num_node = int(args.max_num_node)
     y_pred_long = Variable(torch.zeros(test_batch_size, max_num_node, args.max_prev_node)).to('cuda' if args.cuda else 'cpu') # discrete prediction
     x_step = Variable(torch.ones(test_batch_size,1,args.max_prev_node)).to('cuda' if args.cuda else 'cpu')
+    
+    # Label initialization
+    if label_embedding is not None:
+        # SOS token is num_node_labels (which is index 11 if we have 11 labels 0-10)
+        # args.num_node_labels includes SOS, so if we have 11 labels, num_node_labels is 12.
+        # SOS index is args.num_node_labels - 1? 
+        # In data.py: self.sos_label = self.num_node_labels. 
+        # Wait, if num_node_labels is 12 (11 real + 1 SOS), then indices are 0..11.
+        # SOS index is 11? No, in data.py I set self.sos_label = self.num_node_labels.
+        # If I have 11 labels (0-10), num_node_labels is 11.
+        # Then SOS is 11. So indices are 0..11. Total 12 embeddings needed.
+        # In config.yaml I set num_node_labels: 12.
+        # So SOS index is 12? No, indices are 0..11.
+        # Let's check data.py again.
+        # self.num_node_labels = len(all_labels) (e.g. 11)
+        # self.sos_label = self.num_node_labels (e.g. 11)
+        # So indices are 0..11. Total 12.
+        # So SOS index is args.num_node_labels - 1? 
+        # Actually args.num_node_labels is 12 in config.
+        # So SOS index is 11?
+        # Let's assume SOS is the last index.
+        sos_idx = args.num_node_labels - 1 
+        x_label_step = Variable(torch.ones(test_batch_size, 1) * sos_idx).long().to('cuda' if args.cuda else 'cpu')
+        
+        # Store predicted labels
+        pred_labels = torch.zeros(test_batch_size, max_num_node).long()
+        
     for i in range(max_num_node):
-        h = rnn(x_step)
+        
+        if label_embedding is not None:
+            x_label_embed = label_embedding(x_label_step) # (batch, 1, embed)
+            x_step_input = torch.cat((x_step, x_label_embed), dim=2)
+        else:
+            x_step_input = x_step
+            
+        h = rnn(x_step_input)
+        
+        # Predict label for this node (i)
+        if label_head is not None:
+            label_logits = label_head(h) # (batch, 1, num_classes)
+            # Sample label
+            label_probs = F.softmax(label_logits, dim=2)
+            # dist = torch.distributions.Categorical(label_probs.squeeze(1))
+            # sampled_label = dist.sample() # (batch)
+            # Or just argmax for testing? Or sampling?
+            # Sampling is better for diversity.
+            sampled_label = torch.multinomial(label_probs.view(-1, args.num_node_labels), 1).view(test_batch_size, 1)
+            
+            pred_labels[:, i] = sampled_label.squeeze(1)
+            
+            # Prepare for next step
+            x_label_step = sampled_label
+        
         # output.hidden = h.permute(1,0,2)
         hidden_null = Variable(torch.zeros(args.num_layers - 1, h.size(0), h.size(2))).to('cuda' if args.cuda else 'cpu')
         output.hidden = torch.cat((h.permute(1,0,2), hidden_null),
@@ -588,6 +639,36 @@ def test_rnn_epoch(epoch, args, rnn, output, test_batch_size=16):
     for i in range(test_batch_size):
         adj_pred = decode_adj(y_pred_long_data[i].cpu().numpy())
         G_pred = get_graph(adj_pred) # get a graph from zero-padded adj
+        
+        # Attach labels
+        if label_head is not None:
+            labels = pred_labels[i].cpu().numpy()
+            # Note: G_pred might have fewer nodes than max_num_node if rows were all zeros and removed by get_graph
+            # But get_graph removes zero rows/cols.
+            # We need to map labels to the remaining nodes.
+            # get_graph implementation:
+            # adj = adj[~np.all(adj == 0, axis=1)]
+            # adj = adj[:, ~np.all(adj == 0, axis=0)]
+            # This removes nodes that have no edges.
+            # We should filter labels similarly.
+            
+            # Re-implement get_graph logic here to keep indices consistent
+            adj_full = decode_adj(y_pred_long_data[i].cpu().numpy())
+            # Identify valid nodes (non-zero rows)
+            valid_idx = np.where(~np.all(adj_full == 0, axis=1))[0]
+            
+            # Assign labels
+            for idx, node_idx in enumerate(valid_idx):
+                # G_pred nodes are 0-indexed based on the reduced adjacency
+                # So node 0 in G_pred corresponds to valid_idx[0] in original
+                if idx < G_pred.number_of_nodes():
+                    if node_idx > 0:
+                        G_pred.nodes[idx]['label'] = int(labels[node_idx - 1])
+                    else:
+                        # Node 0 (if kept) doesn't have a predicted label from the loop
+                        # You might want to assign a default or SOS label
+                        G_pred.nodes[idx]['label'] = 0 # or args.num_node_labels - 1
+        
         G_pred_list.append(G_pred)
 
     return G_pred_list
@@ -679,7 +760,7 @@ def train_rnn_forward_epoch(epoch, args, rnn, output, data_loader):
 
 
 ########### train function for LSTM + VAE
-def train(args, dataset_train, rnn, output, label_embedding=None, label_head=None):
+def train(args, dataset_train, rnn, output, label_embedding=None, label_head=None, id_to_label=None):
     # check if necessary directories exist
     if not os.path.isdir(args.model_save_path):
         os.makedirs(args.model_save_path)
@@ -736,11 +817,20 @@ def train(args, dataset_train, rnn, output, label_embedding=None, label_head=Non
                     elif 'GraphRNN_MLP' in args.note:
                         G_pred_step = test_mlp_epoch(epoch, args, rnn, output, test_batch_size=args.test_batch_size,sample_time=sample_time)
                     elif 'GraphRNN_RNN' in args.note:
-                        G_pred_step = test_rnn_epoch(epoch, args, rnn, output, test_batch_size=args.test_batch_size)
+                        G_pred_step = test_rnn_epoch(epoch, args, rnn, output, test_batch_size=args.test_batch_size, label_embedding=label_embedding, label_head=label_head)
                     G_pred.extend(G_pred_step)
                 # save graphs
                 fname = args.graph_save_path + args.fname_pred + str(epoch) +'_'+str(sample_time) + '.dat'
                 save_graph_list(G_pred, fname)
+                
+                # save graphs as txt
+                fname_txt = args.graph_save_path + args.fname_pred + str(epoch) +'_'+str(sample_time) + '.txt'
+                save_graph_list_txt(G_pred, fname_txt, id_to_label)
+                
+                # draw graphs
+                fname_fig = args.figure_prediction_save_path + args.fname_pred + str(epoch) +'_'+str(sample_time)
+                draw_graph_list(G_pred[:16], 4, 4, fname=fname_fig)
+                
                 if 'GraphRNN_RNN' in args.note:
                     break
             print('test done, graphs saved')

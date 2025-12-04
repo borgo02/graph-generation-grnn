@@ -269,12 +269,29 @@ def draw_graph_list(G_list, row, col, fname = 'figures/test', layout='spring', i
         # # nx.draw_networkx(G, with_labels=True, node_size=2, width=0.15, font_size = 1.5, node_color=colors,pos=pos)
         # nx.draw_networkx(G, with_labels=False, node_size=1.5, width=0.2, font_size = 1.5, linewidths=0.2, node_color = 'k',pos=pos,alpha=0.2)
 
+        # Determine node colors
+        node_colors = []
+        if any('label' in G.nodes[n] for n in G.nodes()):
+            # Use a colormap
+            cmap = plt.get_cmap('tab20')
+            for n in G.nodes():
+                if 'label' in G.nodes[n]:
+                    label = G.nodes[n]['label']
+                    # Normalize label to [0, 1] if possible, or just use modulo
+                    # Assuming labels are integers 0-11
+                    color = cmap(label / 20.0) 
+                    node_colors.append(color)
+                else:
+                    node_colors.append('#336699') # Default blue
+        else:
+            node_colors = '#336699'
+
         if is_single:
             # node_size default 60, edge_width default 1.5
-            nx.draw_networkx_nodes(G, pos, node_size=node_size, node_color='#336699', alpha=1, linewidths=0, font_size=0)
+            nx.draw_networkx_nodes(G, pos, node_size=node_size, node_color=node_colors, alpha=1, linewidths=0)
             nx.draw_networkx_edges(G, pos, alpha=alpha, width=width)
         else:
-            nx.draw_networkx_nodes(G, pos, node_size=1.5, node_color='#336699',alpha=1, linewidths=0.2, font_size = 1.5)
+            nx.draw_networkx_nodes(G, pos, node_size=10, node_color=node_colors,alpha=1, linewidths=0.2)
             nx.draw_networkx_edges(G, pos, alpha=0.3,width=0.2)
 
         # plt.axis('off')
@@ -398,8 +415,8 @@ def draw_graph_list(G_list, row, col, fname = 'figures/test', layout='spring', i
 
 # directly get graph statistics from adj, obsoleted
 def decode_graph(adj, prefix):
-    adj = np.asmatrix(adj)
-    G = nx.from_numpy_matrix(adj)
+    # adj = np.asmatrix(adj)
+    G = nx.from_numpy_array(adj)
     # G.remove_nodes_from(nx.isolates(G))
     print('num of nodes: {}'.format(G.number_of_nodes()))
     print('num of edges: {}'.format(G.number_of_edges()))
@@ -429,8 +446,8 @@ def get_graph(adj):
     # remove all zeros rows and columns
     adj = adj[~np.all(adj == 0, axis=1)]
     adj = adj[:, ~np.all(adj == 0, axis=0)]
-    adj = np.asmatrix(adj)
-    G = nx.from_numpy_matrix(adj)
+    # adj = np.asmatrix(adj)
+    G = nx.from_numpy_array(adj)
     return G
 
 # save a list of graphs
@@ -515,4 +532,27 @@ if __name__ == '__main__':
     
     for i in range(0, 160, 16):
         draw_graph_list(graphs[i:i+16], 4, 4, fname='figures/community4_' + str(i))
+
+
+def save_graph_list_txt(G_list, fname, id_to_label=None):
+    with open(fname, "w") as f:
+        for i, G in enumerate(G_list):
+            f.write(f"Graph {i}\n")
+            # Write Nodes
+            for node in sorted(G.nodes()):
+                label = "Unknown"
+                if 'label' in G.nodes[node]:
+                    label_id = G.nodes[node]['label']
+                    if id_to_label and label_id in id_to_label:
+                        label = id_to_label[label_id]
+                    else:
+                        label = str(label_id)
+                f.write(f"Node {node}: {label}\n")
+            
+            f.write("\n")
+            # Write Edges
+            for u, v in sorted(G.edges()):
+                f.write(f"Edge {u} {v}\n")
+            
+            f.write("\n" + "="*20 + "\n\n")
 
