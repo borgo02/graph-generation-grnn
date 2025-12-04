@@ -13,6 +13,9 @@ embedding_size_rnn: 64
 embedding_size_rnn_output: 8
 embedding_size_output: 64
 num_layers: 4
+num_node_labels: 12 # 11 labels + 1 SOS
+label_embedding_size: 8
+label_loss_weight: 1.0
 
 # Training
 batch_size: 32

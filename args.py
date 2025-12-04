@@ -48,6 +48,10 @@ class Args():
         self.embedding_size_output = config.get('embedding_size_output', 64)
         self.num_layers = config.get('num_layers', 4)
         
+        self.num_node_labels = config.get('num_node_labels', 12)
+        self.label_embedding_size = config.get('label_embedding_size', 8)
+        self.label_loss_weight = config.get('label_loss_weight', 1.0)
+        
         # Adjust sizes based on graph type (legacy logic)
         if 'small' in self.graph_type:
             self.parameter_shrink = 2

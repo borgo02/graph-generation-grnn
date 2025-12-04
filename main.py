@@ -123,19 +123,25 @@ if __name__ == '__main__':
                         has_output=False)
         output = MLP_plain(h_size=args.hidden_size_rnn, embedding_size=args.embedding_size_output, y_size=args.max_prev_node)
     elif 'GraphRNN_RNN' in args.note:
-        rnn = GRU_plain(input_size=args.max_prev_node, embedding_size=args.embedding_size_rnn,
+        rnn = GRU_plain(input_size=args.max_prev_node + args.label_embedding_size, embedding_size=args.embedding_size_rnn,
                         hidden_size=args.hidden_size_rnn, num_layers=args.num_layers, has_input=True,
                         has_output=True, output_size=args.hidden_size_rnn_output)
         output = GRU_plain(input_size=1, embedding_size=args.embedding_size_rnn_output,
                            hidden_size=args.hidden_size_rnn_output, num_layers=args.num_layers, has_input=True,
                            has_output=True, output_size=1)
     
+    ### label prediction components
+    label_embedding = nn.Embedding(args.num_node_labels, args.label_embedding_size)
+    label_head = MLP_plain(h_size=args.hidden_size_rnn_output, embedding_size=args.embedding_size_output, y_size=args.num_node_labels)
+
     if args.cuda:
         rnn.cuda()
         output.cuda()
+        label_embedding.cuda()
+        label_head.cuda()
 
     ### start training
-    train(args, dataset_loader, rnn, output)
+    train(args, dataset_loader, rnn, output, label_embedding, label_head)
 
     ### graph completion
     # train_graph_completion(args,dataset_loader,rnn,output)

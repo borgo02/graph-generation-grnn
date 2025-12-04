@@ -442,9 +442,36 @@ class Graph_sequence_sampler_pytorch(torch.utils.data.Dataset):
     def __init__(self, G_list, max_num_node=None, max_prev_node=None, iteration=20000):
         self.adj_all = []
         self.len_all = []
+        self.label_all = []
+        
+        # 1. Collect all unique labels to build a mapping
+        all_labels = set()
+        for G in G_list:
+            for node in G.nodes():
+                if 'label' in G.nodes[node]:
+                    all_labels.add(G.nodes[node]['label'])
+        
+        self.label_to_id = {l: i for i, l in enumerate(sorted(list(all_labels)))}
+        self.num_node_labels = len(all_labels)
+        print(f"Found {self.num_node_labels} unique node labels: {self.label_to_id}")
+        
+        # SOS token for labels will be num_node_labels
+        self.sos_label = self.num_node_labels
+        
         for G in G_list:
             self.adj_all.append(nx.to_numpy_array(G))
             self.len_all.append(G.number_of_nodes())
+            
+            # Extract labels for this graph
+            # Assuming nodes are 0-indexed integers corresponding to adj matrix indices
+            labels = []
+            for i in range(G.number_of_nodes()):
+                if 'label' in G.nodes[i]:
+                    labels.append(self.label_to_id[G.nodes[i]['label']])
+                else:
+                    labels.append(0) # Default or error?
+            self.label_all.append(np.array(labels))
+            
         if max_num_node is None:
             self.n = max(self.len_all)
         else:
@@ -466,24 +493,61 @@ class Graph_sequence_sampler_pytorch(torch.utils.data.Dataset):
         return len(self.adj_all)
     def __getitem__(self, idx):
         adj_copy = self.adj_all[idx].copy()
+        label_copy = self.label_all[idx].copy()
+        
         x_batch = np.zeros((self.n, self.max_prev_node))  # here zeros are padded for small graph
-        x_batch[0,:] = 1 # the first input token is all ones
+        x_batch[0,:] = 1 # the first input token is all ones (SOS for edges)
+        
         y_batch = np.zeros((self.n, self.max_prev_node))  # here zeros are padded for small graph
+        
+        # Label batches
+        x_label_batch = np.zeros((self.n, 1), dtype=int)
+        x_label_batch[0, 0] = self.sos_label # SOS for labels
+        
+        y_label_batch = np.zeros((self.n, 1), dtype=int)
+        
         # generate input x, y pairs
-        len_batch = adj_copy.shape[0]
+        len_batch = adj_copy.shape[0] # Original number of nodes
+        
+        # 1. Random permutation
         x_idx = np.random.permutation(adj_copy.shape[0])
         adj_copy = adj_copy[np.ix_(x_idx, x_idx)]
+        label_copy = label_copy[x_idx] # Permute labels
+        
         G = nx.from_numpy_array(adj_copy)
-        # then do bfs in the permuted G
+        
+        # 2. BFS reordering
         start_idx = np.random.randint(adj_copy.shape[0])
         x_idx = np.array(bfs_seq(G, start_idx))
         adj_copy = adj_copy[np.ix_(x_idx, x_idx)]
+        label_copy = label_copy[x_idx] # Reorder labels by BFS
+        
         adj_encoded = encode_adj(adj_copy.copy(), max_prev_node=self.max_prev_node)
+        
         # get x and y and adj
         # for small graph the rest are zero padded
-        y_batch[0:adj_encoded.shape[0], :] = adj_encoded
-        x_batch[1:adj_encoded.shape[0] + 1, :] = adj_encoded
-        return {'x':x_batch,'y':y_batch, 'len':len_batch}
+        
+        # y_batch:
+        # y[0] = 0 (Node 0 edges - empty)
+        # y[1:n] = adj_encoded (Node 1 to n-1 edges)
+        # Note: adj_encoded has length n-1.
+        y_batch[1:adj_encoded.shape[0] + 1, :] = adj_encoded
+        
+        # x_batch:
+        # x[0] = SOS
+        # x[1] = 0 (Node 0 edges)
+        # x[2:n] = adj_encoded[:-1] (Node 1 to n-2 edges)
+        # Effectively x[i] = y[i-1] for i > 0
+        x_batch[1:adj_encoded.shape[0] + 1, :] = y_batch[0:adj_encoded.shape[0], :]
+        
+        # Labels
+        # y_label contains labels for Node 0 to Node n-1
+        y_label_batch[0:len_batch, 0] = label_copy
+        
+        # x_label contains SOS, then labels for Node 0 to Node n-2
+        x_label_batch[1:len_batch, 0] = label_copy[:-1]
+        
+        return {'x':x_batch, 'y':y_batch, 'len':len_batch, 'x_label':x_label_batch, 'y_label':y_label_batch}
 
     def calc_max_prev_node(self, iter=20000,topk=10):
         max_prev_node = []

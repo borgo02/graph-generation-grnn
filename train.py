@@ -431,7 +431,7 @@ def train_mlp_forward_epoch(epoch, args, rnn, output, data_loader):
 
 def train_rnn_epoch(epoch, args, rnn, output, data_loader,
                     optimizer_rnn, optimizer_output,
-                    scheduler_rnn, scheduler_output):
+                    scheduler_rnn, scheduler_output, label_embedding=None, label_head=None):
     rnn.train()
     output.train()
     loss_sum = 0
@@ -444,15 +444,25 @@ def train_rnn_epoch(epoch, args, rnn, output, data_loader,
         y_len_max = max(y_len_unsorted)
         x_unsorted = x_unsorted[:, 0:y_len_max, :]
         y_unsorted = y_unsorted[:, 0:y_len_max, :]
-        # initialize lstm hidden state according to batch size
+        
+        # Handle labels
+        if label_embedding is not None:
+            x_label_unsorted = data['x_label'].long().squeeze(2) # (batch, len)
+            y_label_unsorted = data['y_label'].long().squeeze(2) # (batch, len)
+            x_label_unsorted = x_label_unsorted[:, 0:y_len_max]
+            y_label_unsorted = y_label_unsorted[:, 0:y_len_max]
+            
         rnn.hidden = rnn.init_hidden(batch_size=x_unsorted.size(0))
-        # output.hidden = output.init_hidden(batch_size=x_unsorted.size(0)*x_unsorted.size(1))
 
         # sort input
         y_len,sort_index = torch.sort(y_len_unsorted,0,descending=True)
         y_len = y_len.numpy().tolist()
         x = torch.index_select(x_unsorted,0,sort_index)
         y = torch.index_select(y_unsorted,0,sort_index)
+        
+        if label_embedding is not None:
+            x_label = torch.index_select(x_label_unsorted, 0, sort_index)
+            y_label = torch.index_select(y_label_unsorted, 0, sort_index)
 
         # input, output for output rnn module
         # a smart use of pytorch builtin function: pack variable--b1_l1,b2_l1,...,b1_l2,b2_l2,...
@@ -472,24 +482,47 @@ def train_rnn_epoch(epoch, args, rnn, output, data_loader,
             count_temp = np.sum(output_y_len_bin[i:]) # count how many y_len is above i
             output_y_len.extend([min(i,y.size(2))]*count_temp) # put them in output_y_len; max value should not exceed y.size(2)
         # pack into variable
-        x = Variable(x).to('cuda' if args.cuda else 'cpu')
-        y = Variable(y).to('cuda' if args.cuda else 'cpu')
-        output_x = Variable(output_x).to('cuda' if args.cuda else 'cpu')
-        output_y = Variable(output_y).to('cuda' if args.cuda else 'cpu')
-        # print(output_y_len)
-        # print('len',len(output_y_len))
-        # print('y',y.size())
-        # print('output_y',output_y.size())
+        x = Variable(x)
+        y = Variable(y)
+        output_x = Variable(output_x)
+        output_y = Variable(output_y)
+        
+        if args.cuda:
+            x = x.cuda()
+            y = y.cuda()
+            output_x = output_x.cuda()
+            output_y = output_y.cuda()
+            if label_embedding is not None:
+                x_label = x_label.cuda()
+                y_label = y_label.cuda()
 
+        # Embed labels and concatenate
+        if label_embedding is not None:
+            x_label_embed = label_embedding(x_label) # (batch, len, embed_size)
+            x = torch.cat((x, x_label_embed), dim=2) # (batch, len, prev_node + embed_size)
 
-        # if using ground truth to train
         h = rnn(x, pack=True, input_len=y_len)
+        
+        # Label Loss
+        label_loss = 0
+        if label_head is not None:
+            # h is (batch, len, hidden)
+            # Pack h to match y_label packing
+            h_packed_for_label = pack_padded_sequence(h, y_len, batch_first=True).data
+            label_logits = label_head(h_packed_for_label)
+            y_label_packed = pack_padded_sequence(y_label, y_len, batch_first=True).data
+            label_loss = F.cross_entropy(label_logits, y_label_packed)
+
         h = pack_padded_sequence(h,y_len,batch_first=True).data # get packed hidden vector
         # reverse h
         idx = [i for i in range(h.size(0) - 1, -1, -1)]
-        idx = Variable(torch.LongTensor(idx)).to('cuda' if args.cuda else 'cpu')
+        idx = Variable(torch.LongTensor(idx))
+        if args.cuda:
+            idx = idx.cuda()
         h = h.index_select(0, idx)
-        hidden_null = Variable(torch.zeros(args.num_layers-1, h.size(0), h.size(1))).to('cuda' if args.cuda else 'cpu')
+        hidden_null = Variable(torch.zeros(args.num_layers-1, h.size(0), h.size(1)))
+        if args.cuda:
+            hidden_null = hidden_null.cuda()
         output.hidden = torch.cat((h.view(1,h.size(0),h.size(1)),hidden_null),dim=0) # num_layers, batch_size, hidden_size
         y_pred = output(output_x, pack=True, input_len=output_y_len)
         y_pred = F.sigmoid(y_pred)
@@ -500,6 +533,10 @@ def train_rnn_epoch(epoch, args, rnn, output, data_loader,
         output_y = pad_packed_sequence(output_y,batch_first=True)[0]
         # use cross entropy loss
         loss = binary_cross_entropy_weight(y_pred, output_y)
+        
+        if label_head is not None:
+            loss += args.label_loss_weight * label_loss
+            
         loss.backward()
         # update deterministic and lstm
         optimizer_output.step()
@@ -508,14 +545,14 @@ def train_rnn_epoch(epoch, args, rnn, output, data_loader,
         scheduler_rnn.step()
 
 
-        if epoch % args.epochs_log==0 and batch_idx==0: # only output first batch's statistics
+        if batch_idx % args.epochs_log == 0:
             print('Epoch: {}/{}, train loss: {:.6f}, graph type: {}, num_layer: {}, hidden: {}'.format(
-                epoch, args.epochs,loss.item(), args.graph_type, args.num_layers, args.hidden_size_rnn))
+                epoch, args.epochs, loss.item(), args.graph_type, args.num_layers, args.hidden_size_rnn))
 
         # logging
         log_value('loss_'+args.fname, loss.item(), epoch*args.batch_ratio+batch_idx)
-        feature_dim = y.size(1)*y.size(2)
-        loss_sum += loss.item()*feature_dim
+
+        loss_sum += loss.item()
     return loss_sum/(batch_idx+1)
 
 
@@ -642,23 +679,30 @@ def train_rnn_forward_epoch(epoch, args, rnn, output, data_loader):
 
 
 ########### train function for LSTM + VAE
-def train(args, dataset_train, rnn, output):
-    # check if load existing model
-    if args.load:
-        fname = args.model_save_path + args.fname + 'lstm_' + str(args.load_epoch) + '.dat'
-        rnn.load_state_dict(torch.load(fname))
-        fname = args.model_save_path + args.fname + 'output_' + str(args.load_epoch) + '.dat'
-        output.load_state_dict(torch.load(fname))
+def train(args, dataset_train, rnn, output, label_embedding=None, label_head=None):
+    # check if necessary directories exist
+    if not os.path.isdir(args.model_save_path):
+        os.makedirs(args.model_save_path)
+    if not os.path.isdir(args.graph_save_path):
+        os.makedirs(args.graph_save_path)
+    if not os.path.isdir(args.figure_save_path):
+        os.makedirs(args.figure_save_path)
+    if not os.path.isdir(args.timing_save_path):
+        os.makedirs(args.timing_save_path)
+    if not os.path.isdir(args.figure_prediction_save_path):
+        os.makedirs(args.figure_prediction_save_path)
+    if not os.path.isdir(args.nll_save_path):
+        os.makedirs(args.nll_save_path)
 
-        args.lr = 0.00001
-        epoch = args.load_epoch
-        print('model loaded!, lr: {}'.format(args.lr))
-    else:
-        epoch = 1
-
-    # initialize optimizer
+    epoch = 1
     optimizer_rnn = optim.Adam(list(rnn.parameters()), lr=args.lr)
     optimizer_output = optim.Adam(list(output.parameters()), lr=args.lr)
+    
+    # Add label parameters to optimizer if present
+    if label_embedding is not None:
+        optimizer_rnn.add_param_group({'params': label_embedding.parameters()})
+    if label_head is not None:
+        optimizer_output.add_param_group({'params': label_head.parameters()})
 
     scheduler_rnn = MultiStepLR(optimizer_rnn, milestones=args.milestones, gamma=args.lr_rate)
     scheduler_output = MultiStepLR(optimizer_output, milestones=args.milestones, gamma=args.lr_rate)
@@ -679,7 +723,7 @@ def train(args, dataset_train, rnn, output):
         elif 'GraphRNN_RNN' in args.note:
             train_rnn_epoch(epoch, args, rnn, output, dataset_train,
                             optimizer_rnn, optimizer_output,
-                            scheduler_rnn, scheduler_output)
+                            scheduler_rnn, scheduler_output, label_embedding, label_head)
         time_end = tm.time()
         time_all[epoch - 1] = time_end - time_start
         # test
