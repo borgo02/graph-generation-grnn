@@ -1,0 +1,51 @@
+# GraphRNN Configuration
+
+# Dataset
+graph_type: helpdesk # Options: grid, enzymes, helpdesk, etc.
+max_num_node: null
+max_prev_node: null
+
+# Model
+note: GraphRNN_RNN # GraphRNN_MLP, GraphRNN_RNN
+hidden_size_rnn: 128
+hidden_size_rnn_output: 16
+embedding_size_rnn: 64
+embedding_size_rnn_output: 8
+embedding_size_output: 64
+num_layers: 4
+
+# Training
+batch_size: 32
+test_batch_size: 32
+test_total_size: 1000
+num_workers: 4
+batch_ratio: 32
+epochs: 3000
+epochs_test_start: 100
+epochs_test: 100
+epochs_log: 100
+epochs_save: 100
+lr: 0.003
+lr_rate: 0.3
+milestones: [400, 1000]
+sample_time: 2
+
+# Output
+dir_input: ./
+model_save_path: ./model_save/
+graph_save_path: ./graphs/
+figure_save_path: ./figures/
+timing_save_path: ./timing/
+figure_prediction_save_path: ./figures_prediction/
+nll_save_path: ./nll/
+clean_tensorboard: false
+cuda: false
+
+# Baseline
+generator_baseline: BA # Gnp, BA
+metric_baseline: clustering # general, degree, clustering
+
+# Loading
+load: false
+load_epoch: 3000
+save: true

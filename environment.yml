@@ -13,8 +13,10 @@ dependencies:
   - pandas
   - pytorch
   - torchvision
+  - pyyaml
   - networkx=3.2.1
   - pip:
     - tensorboard_logger
     - python-louvain
+    - pyemd
     - protobuf<=3.20

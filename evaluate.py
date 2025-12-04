@@ -19,7 +19,8 @@ class Args_evaluate():
 
         # list of dataset to evaluate
         # use a list of 1 element to evaluate a single dataset
-        self.dataset_name_all = ['caveman', 'grid', 'barabasi', 'citeseer', 'DD']
+        self.dataset_name_all = ['helpdesk']
+        #self.dataset_name_all = ['caveman', 'grid', 'barabasi', 'citeseer', 'DD']
         # self.dataset_name_all = ['citeseer_small','caveman_small']
         # self.dataset_name_all = ['barabasi_noise0','barabasi_noise2','barabasi_noise4','barabasi_noise6','barabasi_noise8','barabasi_noise10']
         # self.dataset_name_all = ['caveman_small', 'ladder_small', 'grid_small', 'ladder_small', 'enzymes_small', 'barabasi_small','citeseer_small']
