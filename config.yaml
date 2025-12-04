@@ -16,6 +16,8 @@ num_layers: 4
 num_node_labels: 12 # 11 labels + 1 SOS
 label_embedding_size: 8
 label_loss_weight: 1.0
+min_gen_node_count: 5
+max_gen_node_count: 7
 
 # Training
 batch_size: 32

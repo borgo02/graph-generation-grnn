@@ -818,6 +818,10 @@ def train(args, dataset_train, rnn, output, label_embedding=None, label_head=Non
                         G_pred_step = test_mlp_epoch(epoch, args, rnn, output, test_batch_size=args.test_batch_size,sample_time=sample_time)
                     elif 'GraphRNN_RNN' in args.note:
                         G_pred_step = test_rnn_epoch(epoch, args, rnn, output, test_batch_size=args.test_batch_size, label_embedding=label_embedding, label_head=label_head)
+                    
+                    # Filter graphs
+                    G_pred_step = [g for g in G_pred_step if args.min_gen_node_count <= g.number_of_nodes() <= args.max_gen_node_count]
+                    
                     G_pred.extend(G_pred_step)
                 # save graphs
                 fname = args.graph_save_path + args.fname_pred + str(epoch) +'_'+str(sample_time) + '.dat'

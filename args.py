@@ -20,6 +20,9 @@ class Args():
         parser.add_argument('--note', type=str, default=config.get('note', 'GraphRNN_RNN'), help='Note')
         parser.add_argument('--epochs_test', type=int, default=config.get('epochs_test', 100), help='Epochs test')
         parser.add_argument('--epochs_test_start', type=int, default=config.get('epochs_test_start', 100), help='Epochs test start')
+        parser.add_argument('--test_total_size', type=int, default=config.get('test_total_size', 1000), help='Test total size')
+        parser.add_argument('--min_gen_node_count', type=int, default=config.get('min_gen_node_count', 5), help='Min gen node count')
+        parser.add_argument('--max_gen_node_count', type=int, default=config.get('max_gen_node_count', 7), help='Max gen node count')
         
         # Parse args
         args, unknown = parser.parse_known_args()
@@ -39,6 +42,9 @@ class Args():
         self.note = args.note
         self.epochs_test = args.epochs_test
         self.epochs_test_start = args.epochs_test_start
+        self.test_total_size = args.test_total_size
+        self.min_gen_node_count = args.min_gen_node_count
+        self.max_gen_node_count = args.max_gen_node_count
         self.clean_tensorboard = config.get('clean_tensorboard', False)
 
         # 4. Set other attributes from config (or defaults if missing)
@@ -55,6 +61,10 @@ class Args():
         self.num_node_labels = config.get('num_node_labels', 12)
         self.label_embedding_size = config.get('label_embedding_size', 8)
         self.label_loss_weight = config.get('label_loss_weight', 1.0)
+        self.label_embedding_size = config.get('label_embedding_size', 8)
+        self.label_loss_weight = config.get('label_loss_weight', 1.0)
+        # self.min_gen_node_count = config.get('min_gen_node_count', 5)
+        # self.max_gen_node_count = config.get('max_gen_node_count', 7)
         
         # Adjust sizes based on graph type (legacy logic)
         if 'small' in self.graph_type:
@@ -68,7 +78,7 @@ class Args():
 
         self.batch_size = config.get('batch_size', 32)
         self.test_batch_size = config.get('test_batch_size', 32)
-        self.test_total_size = config.get('test_total_size', 1000)
+        # self.test_total_size = config.get('test_total_size', 1000)
         
         self.num_workers = config.get('num_workers', 4)
         self.batch_ratio = config.get('batch_ratio', 32)
