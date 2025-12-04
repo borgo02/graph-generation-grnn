@@ -86,6 +86,87 @@ class FinalNodeConstraint(GraphConstraint):
             return F.cross_entropy(logits, target)
         return 0.0
 
+class ParallelNodeConstraint(GraphConstraint):
+    """
+    Ensures that parallel nodes (siblings sharing a parent) have similar time attributes.
+    """
+    def __init__(self):
+        pass
+
+    def compute_loss(self, logits, targets, step, **kwargs):
+        """
+        Args:
+            step: Current node index (i)
+            time_pred: Predicted times for current node (batch, 3)
+            adj: Adjacency matrix (batch, max_len, max_prev_node)
+            time_gt: Ground truth times (batch, max_len, 3)
+        """
+        time_pred = kwargs.get('time_pred')
+        adj = kwargs.get('adj')
+        time_gt = kwargs.get('time_gt')
+        
+        if time_pred is None or adj is None or time_gt is None:
+            return 0.0
+            
+        # adj is (batch, max_len, max_prev_node)
+        # adj[b, i, k] = 1 means node i connects to node i-k-1
+        
+        batch_size = time_pred.size(0)
+        loss = 0.0
+        count = 0
+        
+        # Iterate over batch
+        for b in range(batch_size):
+            # Current node i = step
+            # Find parents of node i
+            # Edges are in adj[b, step, :]
+            # If adj[b, step, k] == 1, parent is p = step - k - 1
+            
+            parents_i = []
+            if step < adj.size(1):
+                row = adj[b, step]
+                for k in range(len(row)):
+                    if row[k] == 1:
+                        p = step - k - 1
+                        if p >= 0:
+                            parents_i.append(p)
+            
+            if not parents_i:
+                continue
+                
+            # Find siblings j < i
+            # Sibling j must share at least one parent with i
+            siblings = []
+            for j in range(step):
+                parents_j = []
+                row_j = adj[b, j]
+                for k in range(len(row_j)):
+                    if row_j[k] == 1:
+                        p = j - k - 1
+                        if p >= 0:
+                            parents_j.append(p)
+                            
+                # Check intersection
+                if not set(parents_i).isdisjoint(parents_j):
+                    siblings.append(j)
+            
+            # Compute loss against siblings
+            if siblings:
+                # Average time of siblings? Or minimize distance to each?
+                # Let's minimize distance to the closest sibling or average?
+                # User said "same numbers", so they should be close.
+                # Let's take the mean of siblings' times
+                sibling_times = time_gt[b, siblings, :] # (num_siblings, 3)
+                target_time = sibling_times.mean(dim=0)
+                
+                loss += F.mse_loss(time_pred[b], target_time)
+                count += 1
+                
+        if count > 0:
+            return loss / count
+        return 0.0
+
+
 class ConstraintManager:
     def __init__(self, config, label_to_id):
         self.constraints = []
@@ -115,6 +196,12 @@ class ConstraintManager:
             # Ensure the last node is END
             self.constraints.append(FinalNodeConstraint(label, label_to_id))
             self.weights[FinalNodeConstraint] = c_config.get('final_node_weight', 1.0)
+            
+        # Parallel Node Constraint
+        if 'parallel_node_weight' in c_config:
+            self.constraints.append(ParallelNodeConstraint())
+            self.weights[ParallelNodeConstraint] = c_config.get('parallel_node_weight', 1.0)
+
 
     def compute_loss(self, logits, targets, step, **kwargs):
         total_loss = 0.0

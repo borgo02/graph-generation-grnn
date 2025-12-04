@@ -139,18 +139,23 @@ if __name__ == '__main__':
     ### label prediction components
     label_embedding = nn.Embedding(args.num_node_labels, args.label_embedding_size)
     label_head = MLP_plain(h_size=args.hidden_size_rnn_output, embedding_size=args.embedding_size_output, y_size=args.num_node_labels)
+    time_head = MLP_plain(h_size=args.hidden_size_rnn_output, embedding_size=args.embedding_size_output, y_size=3)
+
 
     if args.cuda:
         rnn.cuda()
         output.cuda()
         label_embedding.cuda()
         label_head.cuda()
+        time_head.cuda()
+
 
     ### start training
     # Create id_to_label mapping
     id_to_label = {v: k for k, v in dataset.label_to_id.items()}
     
-    train(args, dataset_loader, rnn, output, label_embedding, label_head, id_to_label)
+    train(args, dataset_loader, rnn, output, label_embedding, label_head, time_head, id_to_label)
+
 
     ### graph completion
     # train_graph_completion(args,dataset_loader,rnn,output)

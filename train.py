@@ -432,7 +432,8 @@ def train_mlp_forward_epoch(epoch, args, rnn, output, data_loader):
 
 def train_rnn_epoch(epoch, args, rnn, output, data_loader,
                     optimizer_rnn, optimizer_output,
-                    scheduler_rnn, scheduler_output, label_embedding=None, label_head=None, **kwargs):
+                    scheduler_rnn, scheduler_output, label_embedding=None, label_head=None, time_head=None, **kwargs):
+
     rnn.train()
     output.train()
     loss_sum = 0
@@ -460,6 +461,14 @@ def train_rnn_epoch(epoch, args, rnn, output, data_loader,
             x_label_unsorted = x_label_unsorted[:, 0:y_len_max]
             y_label_unsorted = y_label_unsorted[:, 0:y_len_max]
             
+        # Handle times
+        if time_head is not None:
+            x_time_unsorted = data['x_time'].float() # (batch, len, 3)
+            y_time_unsorted = data['y_time'].float() # (batch, len, 3)
+            x_time_unsorted = x_time_unsorted[:, 0:y_len_max, :]
+            y_time_unsorted = y_time_unsorted[:, 0:y_len_max, :]
+
+            
         rnn.hidden = rnn.init_hidden(batch_size=x_unsorted.size(0))
 
         # sort input
@@ -471,6 +480,14 @@ def train_rnn_epoch(epoch, args, rnn, output, data_loader,
         if label_embedding is not None:
             x_label = torch.index_select(x_label_unsorted, 0, sort_index)
             y_label = torch.index_select(y_label_unsorted, 0, sort_index)
+            
+        if time_head is not None:
+            x_time = torch.index_select(x_time_unsorted, 0, sort_index)
+            y_time = torch.index_select(y_time_unsorted, 0, sort_index)
+            if args.cuda:
+                x_time = x_time.cuda()
+                y_time = y_time.cuda()
+
 
         # input, output for output rnn module
         # a smart use of pytorch builtin function: pack variable--b1_l1,b2_l1,...,b1_l2,b2_l2,...
@@ -547,11 +564,49 @@ def train_rnn_epoch(epoch, args, rnn, output, data_loader,
                                 )
                                 label_loss += c_loss
                     
-                    # Apply regular step constraints (StartNode, EndNode)
-                    c_loss = constraint_manager.compute_loss(step_logits, None, step, is_final_step=False)
+                    # Apply regular step constraints (StartNode, EndNode, ParallelNode)
+                    # We need to pass full adjacency and time info for ParallelNodeConstraint
+                    # y is (batch, len, max_prev_node) - this is the ground truth adjacency
+                    # y_time is (batch, len, 3) - ground truth times
+                    # time_pred is (batch, 3) for the current step (if we computed it per step)
+                    
+                    # Wait, time_pred is computed for the WHOLE sequence at once in line 559?
+                    # No, line 559 is OUTSIDE the loop.
+                    # I need to compute time_pred INSIDE the loop or pass the slice.
+                    
+                    # Actually, let's compute time_pred for the current step inside the loop
+                    # h is packed, so we can access h for the current step
+                    
+                    current_time_pred = None
+                    if time_head is not None:
+                        # step_h = h[start_idx:end_idx] # This is hard because h is packed
+                        # But packed_h.data is (total_steps, hidden)
+                        # step_logits corresponds to packed_h.data[start_idx:end_idx]
+                        # So we can compute time_pred for this step
+                        step_h = packed_h.data[start_idx:end_idx]
+                        current_time_pred = time_head(step_h)
+                    
+                    c_loss = constraint_manager.compute_loss(
+                        step_logits, None, step, is_final_step=False,
+                        time_pred=current_time_pred,
+                        adj=y, # Full adjacency
+                        time_gt=y_time # Full ground truth times
+                    )
                     label_loss += c_loss
+
                     
                     start_idx = end_idx
+
+        # Time Loss
+        time_loss = 0
+        if time_head is not None:
+            # h is (batch, len, hidden)
+            # Pack h to match y_time packing
+            packed_h = pack_padded_sequence(h, y_len, batch_first=True)
+            time_pred = time_head(packed_h.data)
+            y_time_packed = pack_padded_sequence(y_time, y_len, batch_first=True).data
+            time_loss = F.mse_loss(time_pred, y_time_packed)
+
 
         h = pack_padded_sequence(h,y_len,batch_first=True).data # get packed hidden vector
         # reverse h
@@ -577,6 +632,12 @@ def train_rnn_epoch(epoch, args, rnn, output, data_loader,
         if label_head is not None:
             loss += args.label_loss_weight * label_loss
             
+        if time_head is not None:
+            # Default weight 1.0 if not specified
+            time_weight = getattr(args, 'time_loss_weight', 1.0)
+            loss += time_weight * time_loss
+
+            
         loss.backward()
         # update deterministic and lstm
         optimizer_output.step()
@@ -597,7 +658,8 @@ def train_rnn_epoch(epoch, args, rnn, output, data_loader,
 
 
 
-def test_rnn_epoch(epoch, args, rnn, output, test_batch_size=16, label_embedding=None, label_head=None, id_to_label=None):
+def test_rnn_epoch(epoch, args, rnn, output, test_batch_size=16, label_embedding=None, label_head=None, time_head=None, id_to_label=None):
+
     rnn.hidden = rnn.init_hidden(test_batch_size)
     rnn.eval()
     output.eval()
@@ -624,6 +686,10 @@ def test_rnn_epoch(epoch, args, rnn, output, test_batch_size=16, label_embedding
         
         # Store predicted labels
         pred_labels = torch.zeros(test_batch_size, max_num_node).long()
+        
+        # Store predicted times
+        pred_times = torch.zeros(test_batch_size, max_num_node, 3).float()
+
         
         # Track sequence lengths (for early termination on END)
         lengths = torch.ones(test_batch_size, dtype=torch.long) * max_num_node
@@ -678,6 +744,12 @@ def test_rnn_epoch(epoch, args, rnn, output, test_batch_size=16, label_embedding
             
             # Prepare for next step
             x_label_step = sampled_label
+            
+        # Predict time for this node (i)
+        if time_head is not None:
+            time_pred = time_head(h) # (batch, 1, 3)
+            pred_times[:, i, :] = time_pred.squeeze(1)
+
         
         # output.hidden = h.permute(1,0,2)
         hidden_null = Variable(torch.zeros(args.num_layers - 1, h.size(0), h.size(2))).to('cuda' if args.cuda else 'cpu')
@@ -717,20 +789,25 @@ def test_rnn_epoch(epoch, args, rnn, output, test_batch_size=16, label_embedding
             valid_idx = np.where(~np.all(adj_full == 0, axis=1))[0]
             
             # Assign labels
-            for idx, node_idx in enumerate(valid_idx):
-                # G_pred nodes are 0-indexed based on the reduced adjacency
-                # So node 0 in G_pred corresponds to valid_idx[0] in original
-                if idx < G_pred.number_of_nodes():
-                    # Correct mapping considering decode_adj offset:
-                    # decode_adj introduces an extra node at index 0 (often isolated/implicit).
-                    # The generated sequence of length corresponds to nodes 1..length.
-                    if node_idx > 0:
-                        if (node_idx - 1) < len(labels):
-                            G_pred.nodes[idx]['label'] = int(labels[node_idx - 1])
-                    else:
-                        # Handle the implicit start node (index 0).
-                        # Assign the first label (which should be 'START')
-                        G_pred.nodes[idx]['label'] = int(labels[0]) if len(labels) > 0 else 0
+            # Assign labels and times
+            for node_idx, idx in enumerate(valid_idx):
+
+                # node_idx is index in adj_full (0 to length-1)
+                # idx is the new node index in G_pred (0 to num_nodes-1)
+                
+                # Assign Label
+                if (node_idx) < len(labels):
+                    G_pred.nodes[idx]['label'] = int(labels[node_idx])
+                else:
+                    G_pred.nodes[idx]['label'] = 0
+                    
+                # Assign Times
+                if time_head is not None:
+                    times = pred_times[i, :length].cpu().numpy()
+                    if node_idx < len(times):
+                        G_pred.nodes[idx]['norm_time'] = float(times[node_idx][0])
+                        G_pred.nodes[idx]['trace_time'] = float(times[node_idx][1])
+                        G_pred.nodes[idx]['prev_event_time'] = float(times[node_idx][2])
         
         G_pred_list.append(G_pred)
 
@@ -823,7 +900,8 @@ def train_rnn_forward_epoch(epoch, args, rnn, output, data_loader):
 
 
 ########### train function for LSTM + VAE
-def train(args, dataset_train, rnn, output, label_embedding=None, label_head=None, id_to_label=None):
+def train(args, dataset_train, rnn, output, label_embedding=None, label_head=None, time_head=None, id_to_label=None):
+
     # check if necessary directories exist
     if not os.path.isdir(args.model_save_path):
         os.makedirs(args.model_save_path)
@@ -847,6 +925,9 @@ def train(args, dataset_train, rnn, output, label_embedding=None, label_head=Non
         optimizer_rnn.add_param_group({'params': label_embedding.parameters()})
     if label_head is not None:
         optimizer_output.add_param_group({'params': label_head.parameters()})
+    if time_head is not None:
+        optimizer_output.add_param_group({'params': time_head.parameters()})
+
 
     scheduler_rnn = MultiStepLR(optimizer_rnn, milestones=args.milestones, gamma=args.lr_rate)
     scheduler_output = MultiStepLR(optimizer_output, milestones=args.milestones, gamma=args.lr_rate)
@@ -867,7 +948,8 @@ def train(args, dataset_train, rnn, output, label_embedding=None, label_head=Non
         elif 'GraphRNN_RNN' in args.note:
             train_rnn_epoch(epoch, args, rnn, output, dataset_train,
                             optimizer_rnn, optimizer_output,
-                            scheduler_rnn, scheduler_output, label_embedding=label_embedding, label_head=label_head, id_to_label=id_to_label)
+                            scheduler_rnn, scheduler_output, label_embedding=label_embedding, label_head=label_head, time_head=time_head, id_to_label=id_to_label)
+
         time_end = tm.time()
         time_all[epoch - 1] = time_end - time_start
         # test
@@ -880,7 +962,8 @@ def train(args, dataset_train, rnn, output, label_embedding=None, label_head=Non
                     elif 'GraphRNN_MLP' in args.note:
                         G_pred_step = test_mlp_epoch(epoch, args, rnn, output, test_batch_size=args.test_batch_size,sample_time=sample_time)
                     elif 'GraphRNN_RNN' in args.note:
-                        G_pred_step = test_rnn_epoch(epoch, args, rnn, output, test_batch_size=args.test_batch_size, label_embedding=label_embedding, label_head=label_head, id_to_label=id_to_label)
+                        G_pred_step = test_rnn_epoch(epoch, args, rnn, output, test_batch_size=args.test_batch_size, label_embedding=label_embedding, label_head=label_head, time_head=time_head, id_to_label=id_to_label)
+
                     
                     # Filter graphs
                     G_pred_step = [g for g in G_pred_step if args.min_gen_node_count <= g.number_of_nodes() <= args.max_gen_node_count]

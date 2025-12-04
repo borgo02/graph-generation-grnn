@@ -547,7 +547,16 @@ def save_graph_list_txt(G_list, fname, id_to_label=None):
                         label = id_to_label[label_id]
                     else:
                         label = str(label_id)
-                f.write(f"Node {node}: {label}\n")
+                f.write(f"Node {node}: {label}")
+                
+                # Write time attributes if present
+                if 'norm_time' in G.nodes[node]:
+                    nt = G.nodes[node]['norm_time']
+                    tt = G.nodes[node].get('trace_time', 0.0)
+                    pet = G.nodes[node].get('prev_event_time', 0.0)
+                    f.write(f" norm_time={nt:.4f} trace_time={tt:.4f} prev_event_time={pet:.4f}")
+                
+                f.write("\n")
             
             f.write("\n")
             # Write Edges

@@ -115,8 +115,20 @@ def Graph_load_from_g_file(filename):
                 # node_id is usually a float string like "1.0", convert to int
                 node_id = int(float(parts[1]))
                 # label is the 3rd element (index 2)
+                # label is the 3rd element (index 2)
                 label = parts[2]
-                G.add_node(node_id, label=label)
+                
+                # Load time attributes if available (indices 6, 7, 8)
+                attrs = {'label': label}
+                if len(parts) >= 9:
+                    try:
+                        attrs['norm_time'] = float(parts[6])
+                        attrs['trace_time'] = float(parts[7])
+                        attrs['prev_event_time'] = float(parts[8])
+                    except ValueError:
+                        pass # Keep default if parsing fails
+                        
+                G.add_node(node_id, **attrs)
             elif parts[0] == 'e':
                 # e source target ...
                 u = int(float(parts[1]))
@@ -443,6 +455,8 @@ class Graph_sequence_sampler_pytorch(torch.utils.data.Dataset):
         self.adj_all = []
         self.len_all = []
         self.label_all = []
+        self.time_all = [] # Store time attributes
+
         
         # 1. Collect all unique labels to build a mapping
         all_labels = set()
@@ -466,15 +480,29 @@ class Graph_sequence_sampler_pytorch(torch.utils.data.Dataset):
             self.adj_all.append(nx.to_numpy_array(G))
             self.len_all.append(G.number_of_nodes())
             
-            # Extract labels for this graph
+            # Extract labels and time attributes for this graph
             # Assuming nodes are 0-indexed integers corresponding to adj matrix indices
             labels = []
+            times = []
             for i in range(G.number_of_nodes()):
                 if 'label' in G.nodes[i]:
                     labels.append(self.label_to_id[G.nodes[i]['label']])
                 else:
                     labels.append(0) # Default or error?
+                
+                # Extract time attributes
+                t_node = [0.0, 0.0, 0.0]
+                if 'norm_time' in G.nodes[i]:
+                    t_node[0] = G.nodes[i]['norm_time']
+                if 'trace_time' in G.nodes[i]:
+                    t_node[1] = G.nodes[i]['trace_time']
+                if 'prev_event_time' in G.nodes[i]:
+                    t_node[2] = G.nodes[i]['prev_event_time']
+                times.append(t_node)
+                
             self.label_all.append(np.array(labels))
+            self.time_all.append(np.array(times))
+
             
         if max_num_node is None:
             self.n = max(self.len_all)
@@ -498,6 +526,7 @@ class Graph_sequence_sampler_pytorch(torch.utils.data.Dataset):
     def __getitem__(self, idx):
         adj_copy = self.adj_all[idx].copy()
         label_copy = self.label_all[idx].copy()
+        time_copy = self.time_all[idx].copy()
         
         x_batch = np.zeros((self.n, self.max_prev_node))  # here zeros are padded for small graph
         x_batch[0,:] = 1 # the first input token is all ones (SOS for edges)
@@ -509,6 +538,12 @@ class Graph_sequence_sampler_pytorch(torch.utils.data.Dataset):
         x_label_batch[0, 0] = self.sos_label # SOS for labels
         
         y_label_batch = np.zeros((self.n, 1), dtype=int)
+
+        # Time batches (3 attributes)
+        x_time_batch = np.zeros((self.n, 3), dtype=float)
+        # SOS for time? Maybe 0.0 is fine, or -1.0? Let's use 0.0 for now.
+        
+        y_time_batch = np.zeros((self.n, 3), dtype=float)
         
         # generate input x, y pairs
         len_batch = adj_copy.shape[0] # Original number of nodes
@@ -517,6 +552,7 @@ class Graph_sequence_sampler_pytorch(torch.utils.data.Dataset):
         x_idx = np.random.permutation(adj_copy.shape[0])
         adj_copy = adj_copy[np.ix_(x_idx, x_idx)]
         label_copy = label_copy[x_idx] # Permute labels
+        time_copy = time_copy[x_idx] # Permute times
         
         G = nx.from_numpy_array(adj_copy)
         
@@ -525,6 +561,8 @@ class Graph_sequence_sampler_pytorch(torch.utils.data.Dataset):
         x_idx = np.array(bfs_seq(G, start_idx))
         adj_copy = adj_copy[np.ix_(x_idx, x_idx)]
         label_copy = label_copy[x_idx] # Reorder labels by BFS
+        time_copy = time_copy[x_idx] # Reorder times by BFS
+
         
         adj_encoded = encode_adj(adj_copy.copy(), max_prev_node=self.max_prev_node)
         
@@ -550,8 +588,16 @@ class Graph_sequence_sampler_pytorch(torch.utils.data.Dataset):
         
         # x_label contains SOS, then labels for Node 0 to Node n-2
         x_label_batch[1:len_batch, 0] = label_copy[:-1]
+
+        # Times
+        # y_time contains times for Node 0 to Node n-1
+        y_time_batch[0:len_batch, :] = time_copy
         
-        return {'x':x_batch, 'y':y_batch, 'len':len_batch, 'x_label':x_label_batch, 'y_label':y_label_batch}
+        # x_time contains SOS (0.0), then times for Node 0 to Node n-2
+        x_time_batch[1:len_batch, :] = time_copy[:-1]
+        
+        return {'x':x_batch, 'y':y_batch, 'len':len_batch, 'x_label':x_label_batch, 'y_label':y_label_batch, 'x_time':x_time_batch, 'y_time':y_time_batch}
+
 
     def calc_max_prev_node(self, iter=20000,topk=10):
         max_prev_node = []
