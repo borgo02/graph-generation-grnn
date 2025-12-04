@@ -79,6 +79,61 @@ def Graph_load_batch(min_num_nodes = 20, max_num_nodes = 1000, name = 'ENZYMES',
     print('Loaded')
     return graphs
 
+
+def Graph_load_from_g_file(filename):
+    """
+    Load graphs from a .g file where graphs are separated by 'XP'.
+    Format:
+    XP
+    v node_id label ...
+    e source target ...
+    """
+    print('Loading graph dataset from file: ' + filename)
+    graphs = []
+    with open(filename, 'r') as f:
+        content = f.read()
+
+    # Split by 'XP' to get individual graph blocks
+    # The first split might be empty or header info, so we filter
+    graph_blocks = content.split('XP')
+    
+    for block in graph_blocks:
+        block = block.strip()
+        if not block:
+            continue
+            
+        G = nx.Graph()
+        lines = block.split('\n')
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+            
+            parts = line.split()
+            if parts[0] == 'v':
+                # v node_id label ...
+                # node_id is usually a float string like "1.0", convert to int
+                node_id = int(float(parts[1]))
+                # label is the 3rd element (index 2)
+                label = parts[2]
+                G.add_node(node_id, label=label)
+            elif parts[0] == 'e':
+                # e source target ...
+                u = int(float(parts[1]))
+                v = int(float(parts[2]))
+                G.add_edge(u, v)
+        
+        # Only add non-empty graphs
+        if G.number_of_nodes() > 0:
+            # Relabel nodes to be 0-indexed integers if they aren't already sequential
+            # But GraphRNN usually expects 0-indexed or 1-indexed. 
+            # Let's convert to 0-indexed integers for consistency with other loaders
+            G = nx.convert_node_labels_to_integers(G, first_label=0)
+            graphs.append(G)
+
+    print('Loaded {} graphs from {}'.format(len(graphs), filename))
+    return graphs
+
 def test_graph_load_DD():
     graphs, max_num_nodes = Graph_load_batch(min_num_nodes=10,name='DD',node_attributes=False,graph_labels=True)
     shuffle(graphs)

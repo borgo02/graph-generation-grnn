@@ -149,6 +149,9 @@ def create(args):
         shuffle(graphs)
         graphs = graphs[0:200]
         args.max_prev_node = 15
+    elif args.graph_type == 'helpdesk':
+        graphs = Graph_load_from_g_file('dataset_v2/Helpdesk_igs_complete.g')
+        args.max_prev_node = 50 # Estimated from dataset inspection (max node id ~86, but prev node dependency is likely smaller)
 
     return graphs
 
