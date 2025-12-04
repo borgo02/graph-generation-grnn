@@ -35,9 +35,9 @@ num_workers: 4
 batch_ratio: 32
 epochs: 200
 epochs_test_start: 100
-epochs_test: 100
-epochs_log: 100
-epochs_save: 100
+epochs_test: 10
+epochs_log: 10
+epochs_save: 10
 lr: 0.003
 lr_rate: 0.3
 milestones: [400, 1000]
