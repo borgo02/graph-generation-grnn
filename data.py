@@ -284,8 +284,8 @@ def test_encode_decode_adj():
     G = nx.connected_caveman_graph(2,3)
     print(G.number_of_nodes())
     
-    adj = np.asarray(nx.to_numpy_matrix(G))
-    G = nx.from_numpy_matrix(adj)
+    adj = nx.to_numpy_array(G)
+    G = nx.from_numpy_array(adj)
     #
     start_idx = np.random.randint(adj.shape[0])
     x_idx = np.array(bfs_seq(G, start_idx))
@@ -360,8 +360,8 @@ def test_encode_decode_adj_full():
     # G = nx.ladder_graph(10)
     G = nx.karate_club_graph()
     # get bfs adj
-    adj = np.asarray(nx.to_numpy_matrix(G))
-    G = nx.from_numpy_matrix(adj)
+    adj = nx.to_numpy_array(G)
+    G = nx.from_numpy_array(adj)
     start_idx = np.random.randint(adj.shape[0])
     x_idx = np.array(bfs_seq(G, start_idx))
     adj = adj[np.ix_(x_idx, x_idx)]
@@ -388,7 +388,7 @@ class Graph_sequence_sampler_pytorch(torch.utils.data.Dataset):
         self.adj_all = []
         self.len_all = []
         for G in G_list:
-            self.adj_all.append(np.asarray(nx.to_numpy_matrix(G)))
+            self.adj_all.append(nx.to_numpy_array(G))
             self.len_all.append(G.number_of_nodes())
         if max_num_node is None:
             self.n = max(self.len_all)
@@ -418,8 +418,7 @@ class Graph_sequence_sampler_pytorch(torch.utils.data.Dataset):
         len_batch = adj_copy.shape[0]
         x_idx = np.random.permutation(adj_copy.shape[0])
         adj_copy = adj_copy[np.ix_(x_idx, x_idx)]
-        adj_copy_matrix = np.asmatrix(adj_copy)
-        G = nx.from_numpy_matrix(adj_copy_matrix)
+        G = nx.from_numpy_array(adj_copy)
         # then do bfs in the permuted G
         start_idx = np.random.randint(adj_copy.shape[0])
         x_idx = np.array(bfs_seq(G, start_idx))
@@ -441,8 +440,7 @@ class Graph_sequence_sampler_pytorch(torch.utils.data.Dataset):
             # print('Graph size', adj_copy.shape[0])
             x_idx = np.random.permutation(adj_copy.shape[0])
             adj_copy = adj_copy[np.ix_(x_idx, x_idx)]
-            adj_copy_matrix = np.asmatrix(adj_copy)
-            G = nx.from_numpy_matrix(adj_copy_matrix)
+            G = nx.from_numpy_array(adj_copy)
             # then do bfs in the permuted G
             start_idx = np.random.randint(adj_copy.shape[0])
             x_idx = np.array(bfs_seq(G, start_idx))
@@ -462,7 +460,7 @@ class Graph_sequence_sampler_pytorch_nobfs(torch.utils.data.Dataset):
         self.adj_all = []
         self.len_all = []
         for G in G_list:
-            self.adj_all.append(np.asarray(nx.to_numpy_matrix(G)))
+            self.adj_all.append(nx.to_numpy_array(G))
             self.len_all.append(G.number_of_nodes())
         if max_num_node is None:
             self.n = max(self.len_all)
@@ -503,7 +501,7 @@ class Graph_sequence_sampler_pytorch_canonical(torch.utils.data.Dataset):
         self.adj_all = []
         self.len_all = []
         for G in G_list:
-            self.adj_all.append(np.asarray(nx.to_numpy_matrix(G)))
+            self.adj_all.append(nx.to_numpy_array(G))
             self.len_all.append(G.number_of_nodes())
         if max_num_node is None:
             self.n = max(self.len_all)
@@ -555,8 +553,7 @@ class Graph_sequence_sampler_pytorch_canonical(torch.utils.data.Dataset):
             # print('Graph size', adj_copy.shape[0])
             x_idx = np.random.permutation(adj_copy.shape[0])
             adj_copy = adj_copy[np.ix_(x_idx, x_idx)]
-            adj_copy_matrix = np.asmatrix(adj_copy)
-            G = nx.from_numpy_matrix(adj_copy_matrix)
+            G = nx.from_numpy_array(adj_copy)
             # then do bfs in the permuted G
             start_idx = np.random.randint(adj_copy.shape[0])
             x_idx = np.array(bfs_seq(G, start_idx))
@@ -576,7 +573,7 @@ class Graph_sequence_sampler_pytorch_nll(torch.utils.data.Dataset):
         self.adj_all = []
         self.len_all = []
         for G in G_list:
-            adj = np.asarray(nx.to_numpy_matrix(G))
+            adj = nx.to_numpy_array(G)
             adj_temp = self.calc_adj(adj)
             self.adj_all.extend(adj_temp)
             self.len_all.append(G.number_of_nodes())
@@ -629,8 +626,7 @@ class Graph_sequence_sampler_pytorch_nll(torch.utils.data.Dataset):
             adj_copy = adj.copy()
             x_idx = np.random.permutation(adj_copy.shape[0])
             adj_copy = adj_copy[np.ix_(x_idx, x_idx)]
-            adj_copy_matrix = np.asmatrix(adj_copy)
-            G = nx.from_numpy_matrix(adj_copy_matrix)
+            G = nx.from_numpy_array(adj_copy)
             # then do bfs in the permuted G
             start_idx = np.random.randint(adj_copy.shape[0])
             x_idx = np.array(bfs_seq(G, start_idx))
@@ -679,7 +675,7 @@ class Graph_sequence_sampler_truncate():
 
         self.adj_all = []
         for G in G_list:
-            self.adj_all.append(np.asarray(nx.to_numpy_matrix(G)))
+            self.adj_all.append(nx.to_numpy_array(G))
 
     def sample(self):
         # batch, length, feature
@@ -694,8 +690,7 @@ class Graph_sequence_sampler_truncate():
             len_batch[i] = adj_copy.shape[0]
             x_idx = np.random.permutation(adj_copy.shape[0])
             adj_copy = adj_copy[np.ix_(x_idx, x_idx)]
-            adj_copy_matrix = np.asmatrix(adj_copy)
-            G = nx.from_numpy_matrix(adj_copy_matrix)
+            G = nx.from_numpy_array(adj_copy)
             # then do bfs in the permuted G
             start_idx = np.random.randint(adj_copy.shape[0])
             x_idx = np.array(bfs_seq(G, start_idx))
@@ -722,8 +717,7 @@ class Graph_sequence_sampler_truncate():
             # print('Graph size', adj_copy.shape[0])
             x_idx = np.random.permutation(adj_copy.shape[0])
             adj_copy = adj_copy[np.ix_(x_idx, x_idx)]
-            adj_copy_matrix = np.asmatrix(adj_copy)
-            G = nx.from_numpy_matrix(adj_copy_matrix)
+            G = nx.from_numpy_array(adj_copy)
             time1 = time.time()
             # then do bfs in the permuted G
             start_idx = np.random.randint(adj_copy.shape[0])
@@ -759,7 +753,7 @@ class Graph_sequence_sampler_fast():
 
         self.adj_all = []
         for G in G_list:
-            self.adj_all.append(np.asarray(nx.to_numpy_matrix(G)))
+            self.adj_all.append(nx.to_numpy_array(G))
 
 
     def sample(self):
@@ -773,8 +767,7 @@ class Graph_sequence_sampler_fast():
             # print('graph size',adj_copy.shape[0])
             x_idx = np.random.permutation(adj_copy.shape[0])
             adj_copy = adj_copy[np.ix_(x_idx, x_idx)]
-            adj_copy_matrix = np.asmatrix(adj_copy)
-            G = nx.from_numpy_matrix(adj_copy_matrix)
+            G = nx.from_numpy_array(adj_copy)
             # then do bfs in the permuted G
             start_idx = np.random.randint(adj_copy.shape[0])
             x_idx = np.array(bfs_seq(G, start_idx))
