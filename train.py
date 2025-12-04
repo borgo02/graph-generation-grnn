@@ -530,8 +530,25 @@ def train_rnn_epoch(epoch, args, rnn, output, data_loader,
                     end_idx = start_idx + step_batch_size.item()
                     step_logits = label_logits[start_idx:end_idx]
                     
+                    # Determine which sequences have this as their final step
+                    # y_len is a list of sequence lengths (sorted descending)
+                    # If y_len[i] == step+1, then this is the final step for sequence i
+                    is_final_for_batch = [(step + 1) == length for length in y_len[:step_batch_size.item()]]
+                    
                     # Compute constraint loss for the current step
-                    c_loss = constraint_manager.compute_loss(step_logits, None, step)
+                    # Pass is_final_step flag for sequences that end at this step
+                    if any(is_final_for_batch):
+                        # Create a tensor mask for final steps
+                        for i, is_final in enumerate(is_final_for_batch):
+                            if is_final and i < step_logits.size(0):
+                                # Apply FinalNodeConstraint to this specific sequence
+                                c_loss = constraint_manager.compute_loss(
+                                    step_logits[i:i+1], None, step, is_final_step=True
+                                )
+                                label_loss += c_loss
+                    
+                    # Apply regular step constraints (StartNode, EndNode)
+                    c_loss = constraint_manager.compute_loss(step_logits, None, step, is_final_step=False)
                     label_loss += c_loss
                     
                     start_idx = end_idx
@@ -639,13 +656,6 @@ def test_rnn_epoch(epoch, args, rnn, output, test_batch_size=16, label_embedding
         # Predict label for this node (i)
         if label_head is not None:
             label_logits = label_head(h) # (batch, 1, num_classes)
-            
-            # Apply Constraint Masking
-            if constraint_manager:
-                # Squeeze to (batch, num_classes) for easier handling
-                logits_squeezed = label_logits.squeeze(1)
-                logits_masked = constraint_manager.apply_mask(logits_squeezed, i)
-                label_logits = logits_masked.unsqueeze(1)
             
             # Sample label
             label_probs = F.softmax(label_logits, dim=2)
