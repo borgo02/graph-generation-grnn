@@ -592,26 +592,33 @@ def test_rnn_epoch(epoch, args, rnn, output, test_batch_size=16, label_embedding
     
     # Label initialization
     if label_embedding is not None:
-        # SOS token is num_node_labels (which is index 11 if we have 11 labels 0-10)
-        # args.num_node_labels includes SOS, so if we have 11 labels, num_node_labels is 12.
-        # SOS index is 11? No, in data.py I set self.sos_label = self.num_node_labels.
-        # If I have 11 labels (0-10), num_node_labels is 11.
-        # Then SOS is 11. So indices are 0..11. Total 12 embeddings needed.
-        # In config.yaml I set num_node_labels: 12.
-        # So SOS index is 12? No, indices are 0..11.
-        # Let's check data.py again.
-        # self.num_node_labels = len(all_labels) (e.g. 11)
-        # self.sos_label = self.num_node_labels (e.g. 11)
-        # So indices are 0..11. Total 12.
-        # So SOS index is args.num_node_labels - 1? 
-        # Actually args.num_node_labels is 12 in config.
-        # So SOS index is 11?
-        # Let's assume SOS is the last index.
-        sos_idx = args.num_node_labels - 1 
+        # Force SOS to be 'START' if available
+        if id_to_label:
+            start_id = None
+            for k, v in id_to_label.items():
+                if v == 'START':
+                    start_id = k
+                    break
+            sos_idx = start_id if start_id is not None else args.num_node_labels - 1
+        else:
+            sos_idx = args.num_node_labels - 1
+        
         x_label_step = Variable(torch.ones(test_batch_size, 1) * sos_idx).long().to('cuda' if args.cuda else 'cpu')
         
         # Store predicted labels
         pred_labels = torch.zeros(test_batch_size, max_num_node).long()
+        
+        # Track sequence lengths (for early termination on END)
+        lengths = torch.ones(test_batch_size, dtype=torch.long) * max_num_node
+        finished = torch.zeros(test_batch_size, dtype=torch.bool)
+        
+        # Find END label ID
+        end_label_id = None
+        if id_to_label:
+            for k, v in id_to_label.items():
+                if v == 'END':
+                    end_label_id = k
+                    break
         
         # Initialize Constraint Manager
         constraint_manager = None
@@ -650,6 +657,15 @@ def test_rnn_epoch(epoch, args, rnn, output, test_batch_size=16, label_embedding
             
             pred_labels[:, i] = sampled_label.squeeze(1)
             
+            # Check for END token (early termination)
+            if end_label_id is not None:
+                for batch_idx in range(test_batch_size):
+                    if not finished[batch_idx]:
+                        label_id = sampled_label[batch_idx].item()
+                        if label_id == end_label_id:
+                            finished[batch_idx] = True
+                            lengths[batch_idx] = i + 1
+            
             # Prepare for next step
             x_label_step = sampled_label
         
@@ -668,26 +684,25 @@ def test_rnn_epoch(epoch, args, rnn, output, test_batch_size=16, label_embedding
         rnn.hidden = Variable(rnn.hidden.data).to('cuda' if args.cuda else 'cpu')
     y_pred_long_data = y_pred_long.data.long()
 
-    # save graphs as pickle
+    # Generate graphs
     G_pred_list = []
     for i in range(test_batch_size):
-        adj_pred = decode_adj(y_pred_long_data[i].cpu().numpy())
-        G_pred = get_graph(adj_pred) # get a graph from zero-padded adj
+        # Use dynamic length if labels were predicted, otherwise use full length
+        if label_head is not None:
+            length = lengths[i].item()
+        else:
+            length = max_num_node
         
+        # Slice predictions based on actual length
+        adj_pred = decode_adj(y_pred_long_data[i, :length, :].cpu().numpy())
+        G_pred = get_graph(adj_pred)
         # Attach labels
         if label_head is not None:
-            labels = pred_labels[i].cpu().numpy()
-            # Note: G_pred might have fewer nodes than max_num_node if rows were all zeros and removed by get_graph
-            # But get_graph removes zero rows/cols.
-            # We need to map labels to the remaining nodes.
-            # get_graph implementation:
-            # adj = adj[~np.all(adj == 0, axis=1)]
-            # adj = adj[:, ~np.all(adj == 0, axis=0)]
-            # This removes nodes that have no edges.
-            # We should filter labels similarly.
+            labels = pred_labels[i, :length].cpu().numpy()
             
             # Re-implement get_graph logic here to keep indices consistent
-            adj_full = decode_adj(y_pred_long_data[i].cpu().numpy())
+            # Use the sliced adjacency matrix that matches the actual length
+            adj_full = decode_adj(y_pred_long_data[i, :length, :].cpu().numpy())
             # Identify valid nodes (non-zero rows)
             valid_idx = np.where(~np.all(adj_full == 0, axis=1))[0]
             
@@ -696,30 +711,16 @@ def test_rnn_epoch(epoch, args, rnn, output, test_batch_size=16, label_embedding
                 # G_pred nodes are 0-indexed based on the reduced adjacency
                 # So node 0 in G_pred corresponds to valid_idx[0] in original
                 if idx < G_pred.number_of_nodes():
-                    # Node 0 (if kept) doesn't have a predicted label from the loop
-                    # You might want to assign a default or SOS label
-                    # But wait, our loop in test_rnn_epoch runs for max_num_node steps.
-                    # Step 0 predicts label for Node 0?
-                    # No, let's look at the loop:
-                    # for i in range(max_num_node):
-                    #    pred_labels[:, i] = sampled_label
-                    # So pred_labels has length max_num_node.
-                    # Index i corresponds to the i-th node generated.
-                    # Node 0 is the first node generated.
-                    # So labels[0] is for Node 0.
-                    # labels[1] is for Node 1.
-                    # So we should use labels[node_idx].
-                    
                     # Correct mapping considering decode_adj offset:
                     # decode_adj introduces an extra node at index 0 (often isolated/implicit).
-                    # The generated sequence of length max_num_node corresponds to nodes 1..max_num_node.
+                    # The generated sequence of length corresponds to nodes 1..length.
                     if node_idx > 0:
                         if (node_idx - 1) < len(labels):
                             G_pred.nodes[idx]['label'] = int(labels[node_idx - 1])
                     else:
                         # Handle the implicit start node (index 0).
-                        # Assign default label (0) as it's not part of the generated sequence.
-                        G_pred.nodes[idx]['label'] = 0
+                        # Assign the first label (which should be 'START')
+                        G_pred.nodes[idx]['label'] = int(labels[0]) if len(labels) > 0 else 0
         
         G_pred_list.append(G_pred)
 

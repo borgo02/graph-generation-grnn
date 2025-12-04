@@ -455,8 +455,12 @@ class Graph_sequence_sampler_pytorch(torch.utils.data.Dataset):
         self.num_node_labels = len(all_labels)
         print(f"Found {self.num_node_labels} unique node labels: {self.label_to_id}")
         
-        # SOS token for labels will be num_node_labels
-        self.sos_label = self.num_node_labels
+        # SOS token for labels
+        # If 'START' exists in the dataset, use it as SOS; otherwise use a generic index
+        if 'START' in self.label_to_id:
+            self.sos_label = self.label_to_id['START']
+        else:
+            self.sos_label = self.num_node_labels
         
         for G in G_list:
             self.adj_all.append(nx.to_numpy_array(G))
