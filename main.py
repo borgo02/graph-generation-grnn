@@ -28,7 +28,12 @@ if __name__ == '__main__':
     configure("tensorboard/run"+time, flush_secs=5)
 
     graphs = create_graphs.create(args)
-    
+
+    # Filter graphs if max_num_node is set
+    if args.max_num_node is not None:
+        graphs = [g for g in graphs if g.number_of_nodes() <= args.max_num_node]
+        print(f"Filtered dataset to graphs with <= {args.max_num_node} nodes. Remaining: {len(graphs)}")
+
     # split datasets
     random.seed(123)
     shuffle(graphs)
