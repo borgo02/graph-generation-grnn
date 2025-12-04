@@ -23,6 +23,8 @@ class Args():
         parser.add_argument('--test_total_size', type=int, default=config.get('test_total_size', 1000), help='Test total size')
         parser.add_argument('--min_gen_node_count', type=int, default=config.get('min_gen_node_count', 5), help='Min gen node count')
         parser.add_argument('--max_gen_node_count', type=int, default=config.get('max_gen_node_count', 7), help='Max gen node count')
+        parser.add_argument('--max_num_node', type=int, default=config.get('max_num_node', None), help='Max num node')
+        parser.add_argument('--max_prev_node', type=int, default=config.get('max_prev_node', None), help='Max prev node')
         
         # Parse args
         args, unknown = parser.parse_known_args()
@@ -45,11 +47,13 @@ class Args():
         self.test_total_size = args.test_total_size
         self.min_gen_node_count = args.min_gen_node_count
         self.max_gen_node_count = args.max_gen_node_count
+        self.max_num_node = args.max_num_node
+        self.max_prev_node = args.max_prev_node
         self.clean_tensorboard = config.get('clean_tensorboard', False)
 
         # 4. Set other attributes from config (or defaults if missing)
-        self.max_num_node = config.get('max_num_node', None)
-        self.max_prev_node = config.get('max_prev_node', None)
+        # self.max_num_node = config.get('max_num_node', None)
+        # self.max_prev_node = config.get('max_prev_node', None)
         
         self.hidden_size_rnn = config.get('hidden_size_rnn', 128)
         self.hidden_size_rnn_output = config.get('hidden_size_rnn_output', 16)

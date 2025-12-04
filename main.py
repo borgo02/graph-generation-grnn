@@ -61,7 +61,8 @@ if __name__ == '__main__':
 
 
 
-    args.max_num_node = max([graphs[i].number_of_nodes() for i in range(len(graphs))])
+    if args.max_num_node is None:
+        args.max_num_node = max([graphs[i].number_of_nodes() for i in range(len(graphs))])
     max_num_edge = max([graphs[i].number_of_edges() for i in range(len(graphs))])
     min_num_edge = min([graphs[i].number_of_edges() for i in range(len(graphs))])
 
