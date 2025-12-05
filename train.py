@@ -796,18 +796,18 @@ def test_rnn_epoch(epoch, args, rnn, output, test_batch_size=16, label_embedding
                 # idx is the new node index in G_pred (0 to num_nodes-1)
                 
                 # Assign Label
-                if (node_idx) < len(labels):
-                    G_pred.nodes[idx]['label'] = int(labels[node_idx])
+                if (idx) < len(labels):
+                    G_pred.nodes[node_idx]['label'] = int(labels[idx])
                 else:
-                    G_pred.nodes[idx]['label'] = 0
+                    G_pred.nodes[node_idx]['label'] = 0
                     
                 # Assign Times
                 if time_head is not None:
-                    times = pred_times[i, :length].cpu().numpy()
-                    if node_idx < len(times):
-                        G_pred.nodes[idx]['norm_time'] = float(times[node_idx][0])
-                        G_pred.nodes[idx]['trace_time'] = float(times[node_idx][1])
-                        G_pred.nodes[idx]['prev_event_time'] = float(times[node_idx][2])
+                    times = pred_times[i, :length].detach().cpu().numpy()
+                    if idx < len(times):
+                        G_pred.nodes[node_idx]['norm_time'] = float(times[idx][0])
+                        G_pred.nodes[node_idx]['trace_time'] = float(times[idx][1])
+                        G_pred.nodes[node_idx]['prev_event_time'] = float(times[idx][2])
         
         G_pred_list.append(G_pred)
 

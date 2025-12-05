@@ -38,10 +38,11 @@ test_total_size: 1000
 num_workers: 4
 batch_ratio: 64
 
-epochs: 200
+epochs: 3000
 epochs_test_start: 100
 epochs_test: 10
 epochs_log: 10
+
 epochs_save: 10
 lr: 0.003
 lr_rate: 0.3
