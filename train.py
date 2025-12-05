@@ -756,7 +756,7 @@ def test_rnn_epoch(epoch, args, rnn, output, test_batch_size=16, label_embedding
         x_step = Variable(torch.zeros(test_batch_size,1,args.max_prev_node)).to('cuda' if args.cuda else 'cpu')
         output_x_step = Variable(torch.ones(test_batch_size,1,1)).to('cuda' if args.cuda else 'cpu')
   
-        for j in range(min(args.max_prev_node,i+1)):
+        for j in range(min(args.max_prev_node, i)):
             output_y_pred_step = output(output_x_step)
             output_x_step = sample_sigmoid(output_y_pred_step, sample=True, sample_time=1)
             x_step[:,:,j:j+1] = output_x_step
@@ -777,7 +777,7 @@ def test_rnn_epoch(epoch, args, rnn, output, test_batch_size=16, label_embedding
         # Slice predictions based on actual length
         # We need length-1 edge vectors to produce length nodes (Node 0 is implicit)
         if length > 0:
-            adj_pred = decode_adj(y_pred_long_data[i, :length-1, :].cpu().numpy())
+            adj_pred = decode_adj(y_pred_long_data[i, 1:length, :].cpu().numpy())
             G_pred = nx.from_numpy_array(adj_pred)
         else:
             G_pred = nx.Graph()
