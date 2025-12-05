@@ -28,8 +28,9 @@ constraints:
   force_end_node: 'END'
   unique_end_weight: 1.0       # Ensure END appears only at final step
   final_node_weight: 1.0       # Ensure last node is END
-  parallel_node_weight: 1.0
-  start_time_weight: 1.0
+  parallel_node_weight: 10.0   # Enforce parallel nodes have same times
+  start_time_weight: 10.0      # Enforce START has trace_time=0, prev_event_time=0
+  monotonic_time_weight: 10.0  # Enforce trace_time increases along path
   connectivity_weight: 1.0
 
 # Training

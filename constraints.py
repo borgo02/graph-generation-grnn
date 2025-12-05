@@ -165,9 +165,6 @@ class ParallelNodeConstraint(GraphConstraint):
         if count > 0:
             return loss / count
         return 0.0
-        if count > 0:
-            return loss / count
-        return 0.0
 
 
 class StartTimeConstraint(GraphConstraint):
@@ -189,6 +186,55 @@ class StartTimeConstraint(GraphConstraint):
             loss = F.mse_loss(time_pred[:, 1:], target)
             return loss
             
+        return 0.0
+
+
+class MonotonicTimeConstraint(GraphConstraint):
+    """
+    Ensures that trace_time increases along the path.
+    For each node, its trace_time should be >= trace_time of its predecessors.
+    """
+    def __init__(self):
+        pass
+
+    def compute_loss(self, logits, targets, step, **kwargs):
+        time_pred = kwargs.get('time_pred')  # (batch, 3) - current step
+        time_gt = kwargs.get('time_gt')  # (batch, max_len, 3) - all ground truth times
+        adj = kwargs.get('adj')  # (batch, max_len, max_prev_node) - adjacency
+        
+        if time_pred is None or time_gt is None or adj is None or step == 0:
+            return 0.0
+        
+        batch_size = time_pred.size(0)
+        loss = 0.0
+        count = 0
+        
+        # Current trace_time prediction (index 1)
+        curr_trace = time_pred[:, 1]  # (batch,)
+        
+        # For each batch, find predecessors and ensure curr_trace > pred_trace
+        for b in range(batch_size):
+            if step >= adj.size(1):
+                continue
+                
+            # Find predecessors of current node (step)
+            # adj[b, step, k] == 1 means edge to node (step - k - 1)
+            row = adj[b, step]
+            for k in range(len(row)):
+                if row[k] == 1:
+                    pred_idx = step - k - 1
+                    if pred_idx >= 0 and pred_idx < time_gt.size(1):
+                        # Get predecessor's trace_time from ground truth
+                        pred_trace = time_gt[b, pred_idx, 1]
+                        
+                        # Penalize if current trace_time < predecessor trace_time
+                        # Use ReLU: max(0, pred_trace - curr_trace)
+                        violation = F.relu(pred_trace - curr_trace[b])
+                        loss += violation
+                        count += 1
+        
+        if count > 0:
+            return loss / count
         return 0.0
 
 class GlobalConnectivityConstraint(GraphConstraint):
@@ -284,6 +330,11 @@ class ConstraintManager:
         if 'start_time_weight' in c_config:
             self.constraints.append(StartTimeConstraint())
             self.weights[StartTimeConstraint] = c_config.get('start_time_weight', 1.0)
+        
+        # Monotonic Time Constraint (trace_time should increase along path)
+        if 'monotonic_time_weight' in c_config:
+            self.constraints.append(MonotonicTimeConstraint())
+            self.weights[MonotonicTimeConstraint] = c_config.get('monotonic_time_weight', 1.0)
             
         # Connectivity Constraint
         if 'connectivity_weight' in c_config:
