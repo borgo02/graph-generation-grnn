@@ -191,6 +191,59 @@ class StartTimeConstraint(GraphConstraint):
             
         return 0.0
 
+class GlobalConnectivityConstraint(GraphConstraint):
+    """
+    Ensures all nodes are reachable from Node 0 using differentiable matrix multiplication.
+    Constructs full adjacency matrix A from y_pred and computes (I+A)^N.
+    """
+    def __init__(self, max_prev_node):
+        self.max_prev_node = max_prev_node
+
+    def compute_loss(self, logits, targets, step, **kwargs):
+        # This constraint is computed once per batch, not per step.
+        
+        y_pred = kwargs.get('y_pred_full')
+        if y_pred is None:
+            return 0.0
+            
+        # y_pred: (batch, N-1, max_prev_node)
+        # Node 0 is START.
+        # y_pred[b, i, :] corresponds to edges for Node i+1.
+        
+        batch_size, seq_len, _ = y_pred.size()
+        num_nodes = seq_len + 1
+        
+        # Construct Adjacency Matrix A (batch, N, N)
+        A = torch.eye(num_nodes).unsqueeze(0).repeat(batch_size, 1, 1).to(y_pred.device)
+        
+        for i in range(seq_len):
+            u = i + 1
+            
+            # Edges to previous nodes
+            # y_pred[b, i, j] is prob of edge (u, u - 1 - j)
+            # j goes from 0 to max_prev_node-1
+            
+            valid_j = min(self.max_prev_node, u)
+            
+            probs = y_pred[:, i, :valid_j] # (batch, valid_j)
+            
+            for j in range(valid_j):
+                v = u - 1 - j
+                A[:, u, v] = probs[:, j]
+                A[:, v, u] = probs[:, j]
+        
+        R = A
+        for _ in range(4):
+            R = torch.bmm(R, R)            
+            pass
+        
+        reachability = R[:, 0, :] # (batch, N)
+        
+        threshold = 1e-2
+        loss = F.relu(threshold - reachability)
+        
+        return torch.mean(loss)
+
 
 class ConstraintManager:
     def __init__(self, config, label_to_id):
@@ -231,13 +284,29 @@ class ConstraintManager:
         if 'start_time_weight' in c_config:
             self.constraints.append(StartTimeConstraint())
             self.weights[StartTimeConstraint] = c_config.get('start_time_weight', 1.0)
-
-
+            
+        # Connectivity Constraint
+        if 'connectivity_weight' in c_config:
+            self.constraints.append(GlobalConnectivityConstraint(max_prev_node=50)) # Default 50
+            self.weights[GlobalConnectivityConstraint] = c_config.get('connectivity_weight', 1.0)
 
     def compute_loss(self, logits, targets, step, **kwargs):
         total_loss = 0.0
         for constraint in self.constraints:
             weight = self.weights.get(type(constraint), 1.0)
+            
+            # Special handling for GlobalConnectivityConstraint (step -1)
+            if step == -1:
+                if isinstance(constraint, GlobalConnectivityConstraint):
+                    loss = constraint.compute_loss(logits, targets, step, **kwargs)
+                    total_loss += weight * loss
+                continue
+                
+            # Skip GlobalConnectivityConstraint for regular steps
+            if isinstance(constraint, GlobalConnectivityConstraint):
+                continue
+                
             loss = constraint.compute_loss(logits, targets, step, **kwargs)
             total_loss += weight * loss
+
         return total_loss

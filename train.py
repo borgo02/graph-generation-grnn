@@ -541,15 +541,10 @@ def train_rnn_epoch(epoch, args, rnn, output, data_loader,
             # Constraint Loss
             if constraint_manager:
                 start_idx = 0
-                # Iterate through packed sequence steps. 
-                # batch_sizes gives the number of active sequences at each time step.
                 for step, step_batch_size in enumerate(packed_h.batch_sizes):
                     end_idx = start_idx + step_batch_size.item()
                     step_logits = label_logits[start_idx:end_idx]
                     
-                    # Determine which sequences have this as their final step
-                    # y_len is a list of sequence lengths (sorted descending)
-                    # If y_len[i] == step+1, then this is the final step for sequence i
                     is_final_for_batch = [(step + 1) == length for length in y_len[:step_batch_size.item()]]
                     
                     # Compute constraint loss for the current step
@@ -565,33 +560,21 @@ def train_rnn_epoch(epoch, args, rnn, output, data_loader,
                                 label_loss += c_loss
                     
                     # Apply regular step constraints (StartNode, EndNode, ParallelNode)
-                    # We need to pass full adjacency and time info for ParallelNodeConstraint
-                    # y is (batch, len, max_prev_node) - this is the ground truth adjacency
-                    # y_time is (batch, len, 3) - ground truth times
-                    # time_pred is (batch, 3) for the current step (if we computed it per step)
-                    
-                    # Wait, time_pred is computed for the WHOLE sequence at once in line 559?
-                    # No, line 559 is OUTSIDE the loop.
-                    # I need to compute time_pred INSIDE the loop or pass the slice.
-                    
-                    # Actually, let's compute time_pred for the current step inside the loop
-                    # h is packed, so we can access h for the current step
-                    
-                    current_time_pred = None
+                    # Get time predictions for this step
+                    step_time_pred = None
                     if time_head is not None:
-                        # step_h = h[start_idx:end_idx] # This is hard because h is packed
-                        # But packed_h.data is (total_steps, hidden)
-                        # step_logits corresponds to packed_h.data[start_idx:end_idx]
-                        # So we can compute time_pred for this step
-                        step_h = packed_h.data[start_idx:end_idx]
-                        current_time_pred = time_head(step_h)
+                         # packed_h.data is (total_steps, hidden)
+                         step_h_rnn = packed_h.data[start_idx:end_idx]
+                         step_time_pred = time_head(step_h_rnn) # (step_batch_size, 3)
                     
+                    # Compute constraint loss for the current step
                     c_loss = constraint_manager.compute_loss(
-                        step_logits, None, step, is_final_step=False,
-                        time_pred=current_time_pred,
-                        adj=y, # Full adjacency
-                        time_gt=y_time # Full ground truth times
+                        step_logits, None, step, is_final_step=is_final_for_batch,
+                        time_pred=step_time_pred,
+                        adj=y, # Full ground truth adjacency (batch, len, max_prev_node)
+                        time_gt=y_time # Full ground truth times (batch, len, 3)
                     )
+
                     label_loss += c_loss
 
                     
@@ -633,11 +616,26 @@ def train_rnn_epoch(epoch, args, rnn, output, data_loader,
             loss += args.label_loss_weight * label_loss
             
         if time_head is not None:
-            # Default weight 1.0 if not specified
             time_weight = getattr(args, 'time_loss_weight', 1.0)
             loss += time_weight * time_loss
-
+                        
+        # Global Connectivity Constraint
+        if constraint_manager:
+            # y_pred is (sum(y_len), max_prev_node, 1)            
+            y_pred_flat = y_pred.squeeze(2) # (sum(y_len), max_prev_node)
+            from torch.nn.utils.rnn import PackedSequence
+            y_pred_packed = PackedSequence(data=y_pred_flat, 
+                                           batch_sizes=packed_h.batch_sizes, 
+                                           sorted_indices=packed_h.sorted_indices, 
+                                           unsorted_indices=packed_h.unsorted_indices)
             
+            # Unpack
+            y_pred_full, _ = pad_packed_sequence(y_pred_packed, batch_first=True)
+            # y_pred_full is (batch, max_len, max_prev_node)
+            
+            c_loss = constraint_manager.compute_loss(None, None, -1, y_pred_full=y_pred_full)
+            loss += c_loss
+
         loss.backward()
         # update deterministic and lstm
         optimizer_output.step()
@@ -757,6 +755,7 @@ def test_rnn_epoch(epoch, args, rnn, output, test_batch_size=16, label_embedding
                                   dim=0)  # num_layers, batch_size, hidden_size
         x_step = Variable(torch.zeros(test_batch_size,1,args.max_prev_node)).to('cuda' if args.cuda else 'cpu')
         output_x_step = Variable(torch.ones(test_batch_size,1,1)).to('cuda' if args.cuda else 'cpu')
+  
         for j in range(min(args.max_prev_node,i+1)):
             output_y_pred_step = output(output_x_step)
             output_x_step = sample_sigmoid(output_y_pred_step, sample=True, sample_time=1)

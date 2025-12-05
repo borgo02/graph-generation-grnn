@@ -30,6 +30,7 @@ constraints:
   final_node_weight: 1.0       # Ensure last node is END
   parallel_node_weight: 1.0
   start_time_weight: 1.0
+  connectivity_weight: 1.0
 
 # Training
 batch_size: 64
