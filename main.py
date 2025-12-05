@@ -108,7 +108,29 @@ if __name__ == '__main__':
         args.max_prev_node = args.max_num_node - 1
     else:
         dataset = Graph_sequence_sampler_pytorch(graphs_train,max_prev_node=args.max_prev_node,max_num_node=args.max_num_node)
-    sample_strategy = torch.utils.data.sampler.WeightedRandomSampler([1.0 / len(dataset) for i in range(len(dataset))],
+    
+    graph_lengths = [graphs_train[i].number_of_nodes() for i in range(len(graphs_train))]
+    from collections import Counter
+    length_counts = Counter(graph_lengths)
+    
+    target_props = {5: 0.34, 6: 0.33, 7: 0.33}
+    
+    sample_weights = []
+    for i in range(len(dataset)):
+        length = graph_lengths[i]
+        if length in target_props:
+            weight = target_props[length] / length_counts[length]
+        else:
+            weight = 0.0
+        sample_weights.append(weight)
+    
+    total_weight = sum(sample_weights)
+    sample_weights = [w / total_weight for w in sample_weights]
+    
+    print(f"Length counts in training: {dict(sorted(length_counts.items()))}")
+    print(f"Target distribution: {target_props}")
+    
+    sample_strategy = torch.utils.data.sampler.WeightedRandomSampler(sample_weights,
                                                                      num_samples=args.batch_size*args.batch_ratio, replacement=True)
     dataset_loader = torch.utils.data.DataLoader(dataset, batch_size=args.batch_size, num_workers=args.num_workers,
                                                sampler=sample_strategy)
