@@ -473,8 +473,11 @@ class Graph_sequence_sampler_pytorch(torch.utils.data.Dataset):
         # If 'START' exists in the dataset, use it as SOS; otherwise use a generic index
         if 'START' in self.label_to_id:
             self.sos_label = self.label_to_id['START']
+            self.start_label_val = self.label_to_id['START']
         else:
             self.sos_label = self.num_node_labels
+            self.start_label_val = None
+
         
         for G in G_list:
             self.adj_all.append(nx.to_numpy_array(G))
@@ -558,7 +561,15 @@ class Graph_sequence_sampler_pytorch(torch.utils.data.Dataset):
         
         # 2. BFS reordering
         start_idx = np.random.randint(adj_copy.shape[0])
+        
+        # Prioritize START node if available
+        if self.start_label_val is not None:
+            start_nodes = np.where(label_copy == self.start_label_val)[0]
+            if len(start_nodes) > 0:
+                start_idx = start_nodes[0]
+                
         x_idx = np.array(bfs_seq(G, start_idx))
+
         adj_copy = adj_copy[np.ix_(x_idx, x_idx)]
         label_copy = label_copy[x_idx] # Reorder labels by BFS
         time_copy = time_copy[x_idx] # Reorder times by BFS

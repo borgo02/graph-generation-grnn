@@ -776,38 +776,34 @@ def test_rnn_epoch(epoch, args, rnn, output, test_batch_size=16, label_embedding
             length = max_num_node
         
         # Slice predictions based on actual length
-        adj_pred = decode_adj(y_pred_long_data[i, :length, :].cpu().numpy())
-        G_pred = get_graph(adj_pred)
+        # We need length-1 edge vectors to produce length nodes (Node 0 is implicit)
+        if length > 0:
+            adj_pred = decode_adj(y_pred_long_data[i, :length-1, :].cpu().numpy())
+            G_pred = nx.from_numpy_array(adj_pred)
+        else:
+            G_pred = nx.Graph()
+            G_pred.add_node(0) # Minimal graph
+
+
         # Attach labels
         if label_head is not None:
             labels = pred_labels[i, :length].cpu().numpy()
             
-            # Re-implement get_graph logic here to keep indices consistent
-            # Use the sliced adjacency matrix that matches the actual length
-            adj_full = decode_adj(y_pred_long_data[i, :length, :].cpu().numpy())
-            # Identify valid nodes (non-zero rows)
-            valid_idx = np.where(~np.all(adj_full == 0, axis=1))[0]
-            
-            # Assign labels
-            # Assign labels and times
-            for node_idx, idx in enumerate(valid_idx):
-
-                # node_idx is index in adj_full (0 to length-1)
-                # idx is the new node index in G_pred (0 to num_nodes-1)
-                
-                # Assign Label
-                if (idx) < len(labels):
-                    G_pred.nodes[node_idx]['label'] = int(labels[idx])
-                else:
-                    G_pred.nodes[node_idx]['label'] = 0
+            # Assign predicted labels and times to Nodes 0..length-1
+            for idx in range(length):
+                if idx < G_pred.number_of_nodes():
+                    # Assign Label
+                    G_pred.nodes[idx]['label'] = int(labels[idx])
                     
-                # Assign Times
-                if time_head is not None:
-                    times = pred_times[i, :length].detach().cpu().numpy()
-                    if idx < len(times):
-                        G_pred.nodes[node_idx]['norm_time'] = float(times[idx][0])
-                        G_pred.nodes[node_idx]['trace_time'] = float(times[idx][1])
-                        G_pred.nodes[node_idx]['prev_event_time'] = float(times[idx][2])
+                    # Assign Times
+                    if time_head is not None:
+                        times = pred_times[i, :length].detach().cpu().numpy()
+                        if idx < len(times):
+                            G_pred.nodes[idx]['norm_time'] = float(times[idx][0])
+                            G_pred.nodes[idx]['trace_time'] = float(times[idx][1])
+                            G_pred.nodes[idx]['prev_event_time'] = float(times[idx][2])
+
+
         
         G_pred_list.append(G_pred)
 
