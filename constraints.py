@@ -165,6 +165,31 @@ class ParallelNodeConstraint(GraphConstraint):
         if count > 0:
             return loss / count
         return 0.0
+        if count > 0:
+            return loss / count
+        return 0.0
+
+
+class StartTimeConstraint(GraphConstraint):
+    """
+    Ensures that the START node (step 0) has trace_time and prev_event_time close to 0.0.
+    """
+    def __init__(self):
+        pass
+
+    def compute_loss(self, logits, targets, step, **kwargs):
+        time_pred = kwargs.get('time_pred') # (batch, 3)
+        
+        if step == 0 and time_pred is not None:
+            # time_pred is [norm_time, trace_time, prev_event_time]
+            # We want trace_time (idx 1) and prev_event_time (idx 2) to be 0.0
+            
+            # Target is 0.0 for indices 1 and 2
+            target = torch.zeros_like(time_pred[:, 1:])
+            loss = F.mse_loss(time_pred[:, 1:], target)
+            return loss
+            
+        return 0.0
 
 
 class ConstraintManager:
@@ -201,6 +226,12 @@ class ConstraintManager:
         if 'parallel_node_weight' in c_config:
             self.constraints.append(ParallelNodeConstraint())
             self.weights[ParallelNodeConstraint] = c_config.get('parallel_node_weight', 1.0)
+            
+        # Start Time Constraint
+        if 'start_time_weight' in c_config:
+            self.constraints.append(StartTimeConstraint())
+            self.weights[StartTimeConstraint] = c_config.get('start_time_weight', 1.0)
+
 
 
     def compute_loss(self, logits, targets, step, **kwargs):

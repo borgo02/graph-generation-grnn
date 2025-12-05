@@ -809,9 +809,6 @@ def test_rnn_epoch(epoch, args, rnn, output, test_batch_size=16, label_embedding
 
     return G_pred_list
 
-
-
-
 def train_rnn_forward_epoch(epoch, args, rnn, output, data_loader):
     rnn.train()
     output.train()

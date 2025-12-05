@@ -501,7 +501,14 @@ class Graph_sequence_sampler_pytorch(torch.utils.data.Dataset):
                     t_node[1] = G.nodes[i]['trace_time']
                 if 'prev_event_time' in G.nodes[i]:
                     t_node[2] = G.nodes[i]['prev_event_time']
+                
+                # Force START times to 0.0
+                if 'label' in G.nodes[i] and G.nodes[i]['label'] == 'START':
+                    t_node[1] = 0.0 # trace_time
+                    t_node[2] = 0.0 # prev_event_time
+                    
                 times.append(t_node)
+
                 
             self.label_all.append(np.array(labels))
             self.time_all.append(np.array(times))
