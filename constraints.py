@@ -287,7 +287,8 @@ class ConstraintManager:
             
         # Connectivity Constraint
         if 'connectivity_weight' in c_config:
-            self.constraints.append(GlobalConnectivityConstraint(max_prev_node=50)) # Default 50
+            max_prev_node = config.get('max_prev_node', 50)
+            self.constraints.append(GlobalConnectivityConstraint(max_prev_node=max_prev_node))
             self.weights[GlobalConnectivityConstraint] = c_config.get('connectivity_weight', 1.0)
 
     def compute_loss(self, logits, targets, step, **kwargs):

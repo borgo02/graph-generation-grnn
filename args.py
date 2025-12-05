@@ -1,6 +1,7 @@
 import argparse
 import yaml
 import os
+import time
 
 ### program configuration
 class Args():
@@ -96,12 +97,21 @@ class Args():
         self.sample_time = config.get('sample_time', 2)
         
         self.dir_input = config.get('dir_input', "./")
-        self.model_save_path = self.dir_input + 'model_save/'
-        self.graph_save_path = self.dir_input + 'graphs/'
-        self.figure_save_path = self.dir_input + 'figures/'
-        self.timing_save_path = self.dir_input + 'timing/'
-        self.figure_prediction_save_path = self.dir_input + 'figures_prediction/'
-        self.nll_save_path = self.dir_input + 'nll/'
+        
+        ### filenames to save intemediate and final outputs
+        self.fname = self.note + '_' + self.graph_type + '_' + str(self.num_layers) + '_' + str(self.hidden_size_rnn) + '_'
+        self.fname_pred = self.note+'_'+self.graph_type+'_'+str(self.num_layers)+'_'+ str(self.hidden_size_rnn)+'_pred_'
+
+        # Generate timestamp and run_id
+        self.timestamp = time.strftime("%Y-%m-%d_%H-%M-%S")
+        self.run_id = self.fname + self.timestamp
+
+        self.model_save_path = self.dir_input + 'model_save/' + self.run_id + '/'
+        self.graph_save_path = self.dir_input + 'graphs/' + self.run_id + '/'
+        self.figure_save_path = self.dir_input + 'figures/' + self.run_id + '/'
+        self.timing_save_path = self.dir_input + 'timing/' + self.run_id + '/'
+        self.figure_prediction_save_path = self.dir_input + 'figures_prediction/' + self.run_id + '/'
+        self.nll_save_path = self.dir_input + 'nll/' + self.run_id + '/'
         
         self.load = config.get('load', False)
         self.load_epoch = config.get('load_epoch', 3000)
@@ -110,9 +120,6 @@ class Args():
         self.generator_baseline = config.get('generator_baseline', 'BA')
         self.metric_baseline = config.get('metric_baseline', 'clustering')
 
-        ### filenames to save intemediate and final outputs
-        self.fname = self.note + '_' + self.graph_type + '_' + str(self.num_layers) + '_' + str(self.hidden_size_rnn) + '_'
-        self.fname_pred = self.note+'_'+self.graph_type+'_'+str(self.num_layers)+'_'+ str(self.hidden_size_rnn)+'_pred_'
         self.fname_train = self.note+'_'+self.graph_type+'_'+str(self.num_layers)+'_'+ str(self.hidden_size_rnn)+'_train_'
         self.fname_test = self.note + '_' + self.graph_type + '_' + str(self.num_layers) + '_' + str(self.hidden_size_rnn) + '_test_'
         self.fname_baseline = self.graph_save_path + self.graph_type + self.generator_baseline+'_'+self.metric_baseline

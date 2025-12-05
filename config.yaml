@@ -3,7 +3,7 @@
 # Dataset
 graph_type: helpdesk # Options: grid, enzymes, helpdesk, etc.
 max_num_node: 7
-max_prev_node: 50
+max_prev_node: 6
 
 # Model
 note: GraphRNN_RNN # GraphRNN_MLP, GraphRNN_RNN
