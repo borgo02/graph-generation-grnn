@@ -102,9 +102,22 @@ class Args():
         self.fname = self.note + '_' + self.graph_type + '_' + str(self.num_layers) + '_' + str(self.hidden_size_rnn) + '_'
         self.fname_pred = self.note+'_'+self.graph_type+'_'+str(self.num_layers)+'_'+ str(self.hidden_size_rnn)+'_pred_'
 
+        # Resume training or start new run
+        self.resume_run_id = config.get('resume_run_id', None)
+        self.load = config.get('load', False)
+        self.load_epoch = config.get('load_epoch', 3000)
+        self.save = config.get('save', True)
+        
         # Generate timestamp and run_id
         self.timestamp = time.strftime("%Y-%m-%d_%H-%M-%S")
-        self.run_id = self.fname + self.timestamp
+        
+        if self.resume_run_id:
+            # When resuming, use the original run's paths
+            self.run_id = self.resume_run_id
+            self.load = True  # Force load when resuming
+            print(f"Resuming training from run: {self.run_id}, epoch: {self.load_epoch}")
+        else:
+            self.run_id = self.fname + self.timestamp
 
         self.model_save_path = self.dir_input + 'model_save/' + self.run_id + '/'
         self.graph_save_path = self.dir_input + 'graphs/' + self.run_id + '/'
@@ -112,10 +125,6 @@ class Args():
         self.timing_save_path = self.dir_input + 'timing/' + self.run_id + '/'
         self.figure_prediction_save_path = self.dir_input + 'figures_prediction/' + self.run_id + '/'
         self.nll_save_path = self.dir_input + 'nll/' + self.run_id + '/'
-        
-        self.load = config.get('load', False)
-        self.load_epoch = config.get('load_epoch', 3000)
-        self.save = config.get('save', True)
         
         self.generator_baseline = config.get('generator_baseline', 'BA')
         self.metric_baseline = config.get('metric_baseline', 'clustering')

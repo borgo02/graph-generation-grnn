@@ -36,7 +36,7 @@ constraints:
 # Training
 batch_size: 64
 test_batch_size: 64
-test_total_size: 1000
+test_total_size: 100
 num_workers: 4
 batch_ratio: 64
 
@@ -66,7 +66,12 @@ cuda: false
 generator_baseline: BA # Gnp, BA
 metric_baseline: clustering # general, degree, clustering
 
-# Loading
+# Loading / Resuming Training
+# To resume a previous run:
+#   1. Set load: true
+#   2. Set resume_run_id to the run folder name (e.g., 'GraphRNN_RNN_helpdesk_4_64_2025-12-06_09-48-34')
+#   3. Set load_epoch to the checkpoint epoch you want to resume from
 load: false
+resume_run_id: null  # Set to the run_id folder name to resume training
 load_epoch: 3000
 save: true

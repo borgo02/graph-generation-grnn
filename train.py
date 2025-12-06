@@ -908,7 +908,28 @@ def train(args, dataset_train, rnn, output, label_embedding=None, label_head=Non
     if not os.path.isdir(args.nll_save_path):
         os.makedirs(args.nll_save_path)
 
-    epoch = 1
+    # Check if we should load from checkpoint
+    if args.load:
+        # Load RNN model
+        fname_rnn = args.model_save_path + args.fname + 'lstm_' + str(args.load_epoch) + '.dat'
+        fname_output = args.model_save_path + args.fname + 'output_' + str(args.load_epoch) + '.dat'
+        
+        if os.path.exists(fname_rnn) and os.path.exists(fname_output):
+            rnn.load_state_dict(torch.load(fname_rnn, map_location='cpu'))
+            output.load_state_dict(torch.load(fname_output, map_location='cpu'))
+            epoch = args.load_epoch + 1
+            print(f'Model loaded from epoch {args.load_epoch}! Resuming from epoch {epoch}')
+            print(f'  Loaded RNN: {fname_rnn}')
+            print(f'  Loaded Output: {fname_output}')
+        else:
+            print(f'WARNING: Could not find checkpoint files:')
+            print(f'  RNN: {fname_rnn} (exists: {os.path.exists(fname_rnn)})')
+            print(f'  Output: {fname_output} (exists: {os.path.exists(fname_output)})')
+            print('Starting from epoch 1 instead.')
+            epoch = 1
+    else:
+        epoch = 1
+        
     optimizer_rnn = optim.Adam(list(rnn.parameters()), lr=args.lr)
     optimizer_output = optim.Adam(list(output.parameters()), lr=args.lr)
     
