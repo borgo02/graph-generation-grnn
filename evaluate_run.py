@@ -2,10 +2,10 @@
 Evaluate generated graphs against ground truth for a specific training run.
 
 Usage:
-    python evaluate_run.py --run_id <run_folder_name> --epoch <epoch_to_evaluate>
+    python evaluate_run.py --run_id <run_folder_name> --epoch <epoch_to_evaluate> --with-ig-metrics
     
 Example:
-    python evaluate_run.py --run_id GraphRNN_RNN_helpdesk_4_128_2025-12-07_11-44-02 --epoch 300
+    python evaluate_run.py --run_id GraphRNN_RNN_helpdesk_4_128_2025-12-07_11-44-02 --epoch 300 --with-ig-metrics
 """
 import argparse
 import os
@@ -19,6 +19,7 @@ import numpy as np
 from random import shuffle
 
 import eval.stats
+import eval.ig_metrics
 
 
 def load_graphs(fname):
@@ -116,6 +117,12 @@ def main():
                         help='Specific epoch to evaluate (default: latest)')
     parser.add_argument('--sample_time', type=int, default=1,
                         help='Sample time suffix (default: 1)')
+    parser.add_argument('--with-ig-metrics', action='store_true',
+                        help='Compute Instance Graph metrics (Avg Generalization)')
+    parser.add_argument('--ground-truth', type=str, default=None,
+                        help='Path to ground truth graphs file (for Accuracy/MC metrics)')
+    parser.add_argument('--mc-timeout', type=float, default=5.0,
+                        help='Timeout per graph for Matching Cost computation (default: 5.0s)')
     
     args = parser.parse_args()
     
@@ -205,6 +212,26 @@ def main():
     # Uniqueness analysis
     uniqueness = analyze_uniqueness(graph_pred, graph_train)
     
+    # Instance Graph metrics (optional)
+    ig_results = None
+    if args.with_ig_metrics:
+        print("\n" + "=" * 60)
+        print("INSTANCE GRAPH METRICS")
+        print("=" * 60)
+        
+        # Load ground truth if provided (for Accuracy and Matching Cost)
+        true_graphs = None
+        if args.ground_truth and os.path.exists(args.ground_truth):
+            true_graphs = load_graphs(args.ground_truth)
+            print(f"Loaded {len(true_graphs)} ground truth graphs")
+        
+        ig_results = eval.ig_metrics.evaluate_instance_graphs(
+            pred_graphs=graph_pred,
+            true_graphs=true_graphs,
+            compute_ag=True,
+            mc_timeout=args.mc_timeout
+        )
+    
     # Summary
     print("\n" + "=" * 60)
     print("SUMMARY")
@@ -214,6 +241,20 @@ def main():
     print(f"Clustering MMD: {results['clustering']:.6f}")
     print(f"Orbits MMD: {results['orbits']:.6f}" if results['orbits'] >= 0 else "Orbits MMD: N/A")
     print(f"Novelty: {100*uniqueness['novel']/uniqueness['total']:.1f}%")
+    
+    if ig_results:
+        ag = ig_results.get('avg_generalization', {})
+        if ag.get('num_dags', 0) > 0:
+            print(f"Avg Generalization: {ag.get('dag_mean', 'N/A'):.2f} (DAGs: {ag.get('num_dags')}, Cyclic: {ag.get('num_cyclic')})")
+        else:
+            print(f"Avg Generalization: N/A (all {ag.get('num_cyclic', 0)} graphs contain cycles)")
+        if 'accuracy' in ig_results:
+            acc = ig_results['accuracy']
+            print(f"Accuracy: {acc['count']}/{ig_results['num_true']} ({acc['percentage']:.1f}%)")
+        if 'matching_cost' in ig_results:
+            mc = ig_results['matching_cost']
+            print(f"Matching Cost: mean={mc['mean']:.2f}, median={mc['median']:.2f}")
+    
     print("=" * 60)
 
 
