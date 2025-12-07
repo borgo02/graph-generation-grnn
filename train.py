@@ -526,6 +526,10 @@ def train_rnn_epoch(epoch, args, rnn, output, data_loader,
             x_label_embed = label_embedding(x_label) # (batch, len, embed_size)
             x = torch.cat((x, x_label_embed), dim=2) # (batch, len, prev_node + embed_size)
 
+        # Concatenate time features
+        if time_head is not None:
+            x = torch.cat((x, x_time), dim=2) # (batch, len, prev_node + embed_size + 3)
+
         h = rnn(x, pack=True, input_len=y_len)
         
         # Label Loss
@@ -687,7 +691,9 @@ def test_rnn_epoch(epoch, args, rnn, output, test_batch_size=16, label_embedding
         
         # Store predicted times
         pred_times = torch.zeros(test_batch_size, max_num_node, 3).float()
-
+        
+        # Initialize time features for first step (SOS = all zeros)
+        x_time_step = Variable(torch.zeros(test_batch_size, 1, 3)).to('cuda' if args.cuda else 'cpu')
         
         # Track sequence lengths (for early termination on END)
         lengths = torch.ones(test_batch_size, dtype=torch.long) * max_num_node
@@ -714,6 +720,10 @@ def test_rnn_epoch(epoch, args, rnn, output, test_batch_size=16, label_embedding
             x_step_input = torch.cat((x_step, x_label_embed), dim=2)
         else:
             x_step_input = x_step
+        
+        # Concatenate time features
+        if time_head is not None:
+            x_step_input = torch.cat((x_step_input, x_time_step), dim=2)
             
         h = rnn(x_step_input)
         
@@ -746,7 +756,9 @@ def test_rnn_epoch(epoch, args, rnn, output, test_batch_size=16, label_embedding
         # Predict time for this node (i)
         if time_head is not None:
             time_pred = time_head(h) # (batch, 1, 3)
-            pred_times[:, i, :] = time_pred.squeeze(1)
+            pred_times[:, i, :] = time_pred.squeeze(1).detach().cpu()
+            # Feed predicted time to next step
+            x_time_step = time_pred.detach()
 
         
         # output.hidden = h.permute(1,0,2)
@@ -913,10 +925,33 @@ def train(args, dataset_train, rnn, output, label_embedding=None, label_head=Non
         # Load RNN model
         fname_rnn = args.model_save_path + args.fname + 'lstm_' + str(args.load_epoch) + '.dat'
         fname_output = args.model_save_path + args.fname + 'output_' + str(args.load_epoch) + '.dat'
+        fname_label_embed = args.model_save_path + args.fname + 'label_embedding_' + str(args.load_epoch) + '.dat'
+        fname_label_head = args.model_save_path + args.fname + 'label_head_' + str(args.load_epoch) + '.dat'
+        fname_time_head = args.model_save_path + args.fname + 'time_head_' + str(args.load_epoch) + '.dat'
         
         if os.path.exists(fname_rnn) and os.path.exists(fname_output):
             rnn.load_state_dict(torch.load(fname_rnn, map_location='cpu'))
             output.load_state_dict(torch.load(fname_output, map_location='cpu'))
+            
+            # Load label embedding, label head, and time head if they exist
+            if label_embedding is not None and os.path.exists(fname_label_embed):
+                label_embedding.load_state_dict(torch.load(fname_label_embed, map_location='cpu'))
+                print(f'  Loaded Label Embedding: {fname_label_embed}')
+            elif label_embedding is not None:
+                print(f'  WARNING: Label embedding checkpoint not found, using random weights')
+                
+            if label_head is not None and os.path.exists(fname_label_head):
+                label_head.load_state_dict(torch.load(fname_label_head, map_location='cpu'))
+                print(f'  Loaded Label Head: {fname_label_head}')
+            elif label_head is not None:
+                print(f'  WARNING: Label head checkpoint not found, using random weights')
+                
+            if time_head is not None and os.path.exists(fname_time_head):
+                time_head.load_state_dict(torch.load(fname_time_head, map_location='cpu'))
+                print(f'  Loaded Time Head: {fname_time_head}')
+            elif time_head is not None:
+                print(f'  WARNING: Time head checkpoint not found, using random weights')
+            
             epoch = args.load_epoch + 1
             print(f'Model loaded from epoch {args.load_epoch}! Resuming from epoch {epoch}')
             print(f'  Loaded RNN: {fname_rnn}')
@@ -1006,6 +1041,17 @@ def train(args, dataset_train, rnn, output, label_embedding=None, label_head=Non
                 torch.save(rnn.state_dict(), fname)
                 fname = args.model_save_path + args.fname + 'output_' + str(epoch) + '.dat'
                 torch.save(output.state_dict(), fname)
+                
+                # Save label embedding, label head, and time head
+                if label_embedding is not None:
+                    fname = args.model_save_path + args.fname + 'label_embedding_' + str(epoch) + '.dat'
+                    torch.save(label_embedding.state_dict(), fname)
+                if label_head is not None:
+                    fname = args.model_save_path + args.fname + 'label_head_' + str(epoch) + '.dat'
+                    torch.save(label_head.state_dict(), fname)
+                if time_head is not None:
+                    fname = args.model_save_path + args.fname + 'time_head_' + str(epoch) + '.dat'
+                    torch.save(time_head.state_dict(), fname)
         epoch += 1
     np.save(args.timing_save_path+args.fname,time_all)
 

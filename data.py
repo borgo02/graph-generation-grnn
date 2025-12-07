@@ -118,13 +118,14 @@ def Graph_load_from_g_file(filename):
                 # label is the 3rd element (index 2)
                 label = parts[2]
                 
-                # Load time attributes if available (indices 6, 7, 8)
+                # Load time attributes if available (last 3 columns: norm_time, trace_time, prev_event_time)
+                # Using negative indices because quoted timestamps split into multiple parts
                 attrs = {'label': label}
-                if len(parts) >= 9:
+                if len(parts) >= 11:  # v, node_id, label, 2x quoted timestamps (4 parts), case_id, 3 time values
                     try:
-                        attrs['norm_time'] = float(parts[6])
-                        attrs['trace_time'] = float(parts[7])
-                        attrs['prev_event_time'] = float(parts[8])
+                        attrs['norm_time'] = float(parts[-3])
+                        attrs['trace_time'] = float(parts[-2])
+                        attrs['prev_event_time'] = float(parts[-1])
                     except ValueError:
                         pass # Keep default if parsing fails
                         

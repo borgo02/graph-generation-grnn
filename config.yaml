@@ -40,12 +40,12 @@ test_total_size: 100
 num_workers: 4
 batch_ratio: 64
 
-epochs: 3000
-epochs_test_start: 100
-epochs_test: 10
-epochs_log: 10
+epochs: 300
+epochs_test_start: 50
+epochs_test: 50
+epochs_log: 50
 
-epochs_save: 10
+epochs_save: 50
 lr: 0.003
 lr_rate: 0.3
 milestones: [400, 1000]
