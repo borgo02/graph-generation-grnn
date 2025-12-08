@@ -345,11 +345,12 @@ class GraphTimeNetwork(nn.Module):
     """
     Predicts time features for all nodes given full graph structure.
     
-    Uses node position (BFS order) as the primary signal for time prediction.
-    Later nodes in BFS order naturally have larger times.
+    Uses topological depth (computed from adjacency) as the primary time signal.
+    Nodes at the same depth get the same base time, ensuring parallel nodes
+    have equal times.
     
-    Key insight: In BFS ordering, node index is a proxy for topological depth,
-    so we can use normalized position as a base for time prediction.
+    Depth computation: depth[node] = max(depth[predecessors]) + 1
+    This ensures nodes with the same predecessors get the same depth.
     """
     
     def __init__(self, num_labels, label_embed_dim=16, hidden_dim=64, 
@@ -357,16 +358,17 @@ class GraphTimeNetwork(nn.Module):
         super(GraphTimeNetwork, self).__init__()
         self.num_time_features = num_time_features
         self.max_nodes = max_nodes
+        self.num_iterations = num_iterations  # For depth propagation
         
         # Label embedding
         self.label_embedding = nn.Embedding(num_labels, label_embed_dim)
         
-        # Position embedding
-        self.position_embedding = nn.Embedding(max_nodes, label_embed_dim)
+        # Depth embedding
+        self.depth_embedding = nn.Embedding(max_nodes, label_embed_dim)
         
-        # MLP to predict time offset from base position
-        # Input: label + position + normalized_position_scalar
-        input_dim = label_embed_dim * 2 + 1  # +1 for normalized position
+        # MLP to predict time offset from base depth
+        # Input: label + depth_embed + normalized_depth_scalar
+        input_dim = label_embed_dim * 2 + 1  # +1 for normalized depth
         self.time_mlp = nn.Sequential(
             nn.Linear(input_dim, hidden_dim),
             nn.ReLU(),
@@ -380,10 +382,60 @@ class GraphTimeNetwork(nn.Module):
             if isinstance(m, nn.Linear):
                 init.xavier_uniform_(m.weight.data, gain=nn.init.calculate_gain('relu'))
     
+    def compute_depth(self, adjacency):
+        """
+        Compute topological depth for each node.
+        depth[node] = max(depth[predecessors]) + 1
+        Node 0 (START) has depth 0.
+        
+        Args:
+            adjacency: (batch, num_nodes, num_nodes) - adj[b, src, tgt] = edge src→tgt
+        
+        Returns:
+            depths: (batch, num_nodes) - integer depth for each node
+        """
+        batch_size, num_nodes, _ = adjacency.shape
+        device = adjacency.device
+        
+        # Initialize depths: node 0 has depth 0, others start at 0 too
+        depths = torch.zeros(batch_size, num_nodes, device=device)
+        
+        # Transpose: adj_t[b, tgt, src] = edge src→tgt (gives us predecessors of tgt)
+        adj_t = adjacency.transpose(1, 2)  # (batch, tgt, src)
+        
+        # Iteratively propagate depths
+        # depth[node] = max(depth[predecessors]) + 1 if node has predecessors
+        for _ in range(num_nodes):  # At most num_nodes iterations needed
+            # For each node, find max depth of predecessors
+            # adj_t[b, tgt, src] * depths[b, src] gives weighted predecessor depths
+            # But we want max, not weighted sum
+            
+            # Mask: where there are incoming edges
+            has_predecessor = (adj_t.sum(dim=2) > 0.5).float()  # (batch, num_nodes)
+            
+            # Compute max predecessor depth for each node
+            # Use broadcasting: depths[:, None, :] is (batch, 1, num_nodes)
+            predecessor_depths = depths.unsqueeze(1).expand(-1, num_nodes, -1)  # (batch, num_nodes, num_nodes)
+            # Mask out non-predecessors with -inf
+            mask = (adj_t > 0.5).float()
+            masked_depths = predecessor_depths * mask + (-1e6) * (1 - mask)
+            max_pred_depth = masked_depths.max(dim=2)[0]  # (batch, num_nodes)
+            
+            # New depth: max_pred_depth + 1, but only for nodes with predecessors
+            new_depths = (max_pred_depth + 1) * has_predecessor + depths * (1 - has_predecessor)
+            
+            # Keep node 0 at depth 0
+            new_depths[:, 0] = 0
+            
+            depths = new_depths
+        
+        return depths
+    
     def forward(self, adjacency, node_labels, node_mask=None):
         """
         Args:
-            adjacency: (batch, num_nodes, num_nodes) - edge probabilities (unused for now)
+            adjacency: (batch, num_nodes, num_nodes) - edge probabilities
+                       adjacency[b, src, tgt] = probability of edge src → tgt
             node_labels: (batch, num_nodes) - label IDs for each node
             node_mask: (batch, num_nodes) - optional mask for valid nodes
         
@@ -397,30 +449,30 @@ class GraphTimeNetwork(nn.Module):
         # Get label embeddings
         label_features = self.label_embedding(node_labels)  # (batch, num_nodes, embed_dim)
         
-        # Get position embeddings and normalized position
-        positions = torch.arange(num_nodes, device=device).unsqueeze(0).expand(batch_size, -1)
-        positions_clamped = positions.clamp(max=self.max_nodes - 1)
-        position_features = self.position_embedding(positions_clamped)  # (batch, num_nodes, embed_dim)
+        # Compute depth from adjacency
+        depths = self.compute_depth(adjacency)  # (batch, num_nodes)
         
-        # Normalized position (0 to 1 based on node index)
-        # This gives a strong monotonicity prior
-        norm_positions = positions.float() / max(num_nodes - 1, 1)  # (batch, num_nodes)
-        norm_positions = norm_positions.unsqueeze(-1)  # (batch, num_nodes, 1)
+        # Get depth embeddings
+        depths_clamped = depths.long().clamp(0, self.max_nodes - 1)
+        depth_features = self.depth_embedding(depths_clamped)  # (batch, num_nodes, embed_dim)
+        
+        # Normalized depth (0 to 1)
+        max_depth = depths.max(dim=1, keepdim=True)[0].clamp(min=1)  # Avoid div by zero
+        norm_depths = depths / max_depth  # (batch, num_nodes)
+        norm_depths = norm_depths.unsqueeze(-1)  # (batch, num_nodes, 1)
         
         # Combine features
-        combined = torch.cat([label_features, position_features, norm_positions], dim=-1)
+        combined = torch.cat([label_features, depth_features, norm_depths], dim=-1)
         
         # Predict time offsets
         time_offsets = self.time_mlp(combined)  # (batch, num_nodes, 3)
         
-        # Base times from normalized position (ensures monotonicity)
-        # Scale offsets with sigmoid and add small learned adjustment
-        base_times = norm_positions.expand(-1, -1, self.num_time_features)  # (batch, num_nodes, 3)
+        # Base times from normalized depth (ensures parallel nodes have same base)
+        base_times = norm_depths.expand(-1, -1, self.num_time_features)  # (batch, num_nodes, 3)
         
-        # Final times: blend base position with learned offset
-        # sigmoid(offset) * 0.2 gives small adjustment range around base
-        times = base_times + 0.2 * torch.sigmoid(time_offsets) - 0.1  # Centered adjustment
-        times = times.clamp(0, 1)  # Ensure in [0, 1]
+        # Final times: base depth + small learned offset
+        times = base_times + 0.2 * torch.sigmoid(time_offsets) - 0.1
+        times = times.clamp(0, 1)
         
         # Apply mask if provided
         if node_mask is not None:
