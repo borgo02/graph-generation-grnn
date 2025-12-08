@@ -15,7 +15,7 @@ import torch
 import torch.nn as nn
 import yaml
 import networkx as nx
-from model import GRU_plain, MLP_plain
+from model import GRU_plain, MLP_plain, GraphTimeNetwork
 from train import test_rnn_epoch
 from utils import save_graph_list, draw_graph_list
 
@@ -80,9 +80,9 @@ def load_model_from_checkpoint(model_dir, fname_prefix, epoch, config, device='c
     print(f"  num_layers: {num_layers}")
     print(f"  num_node_labels: {num_node_labels}")
     
-    # Create models
+    # Create models (no time features in RNN input - times are predicted post-graph)
     rnn = GRU_plain(
-        input_size=max_prev_node + label_embedding_size + 3, 
+        input_size=max_prev_node + label_embedding_size, 
         embedding_size=embedding_size_rnn,
         hidden_size=hidden_size_rnn, 
         num_layers=num_layers, 
@@ -103,14 +103,26 @@ def load_model_from_checkpoint(model_dir, fname_prefix, epoch, config, device='c
     
     label_embedding = nn.Embedding(num_node_labels, label_embedding_size)
     label_head = MLP_plain(h_size=hidden_size_rnn_output, embedding_size=embedding_size_output, y_size=num_node_labels)
-    time_head = MLP_plain(h_size=hidden_size_rnn_output, embedding_size=embedding_size_output, y_size=3)
+    
+    # GraphTimeNetwork: predicts times after graph structure is generated
+    graph_time_hidden = config.get('graph_time_hidden_dim', 64)
+    graph_time_iterations = config.get('graph_time_iterations', 3)
+    max_num_node = config.get('max_num_node', 7)
+    graph_time_net = GraphTimeNetwork(
+        num_labels=num_node_labels,
+        label_embed_dim=label_embedding_size,
+        hidden_dim=graph_time_hidden,
+        num_iterations=graph_time_iterations,
+        num_time_features=3,
+        max_nodes=max_num_node
+    )
     
     # Build checkpoint paths
     fname_rnn = os.path.join(model_dir, fname_prefix + 'lstm_' + str(epoch) + '.dat')
     fname_output = os.path.join(model_dir, fname_prefix + 'output_' + str(epoch) + '.dat')
     fname_label_embed = os.path.join(model_dir, fname_prefix + 'label_embedding_' + str(epoch) + '.dat')
     fname_label_head = os.path.join(model_dir, fname_prefix + 'label_head_' + str(epoch) + '.dat')
-    fname_time_head = os.path.join(model_dir, fname_prefix + 'time_head_' + str(epoch) + '.dat')
+    fname_graph_time_net = os.path.join(model_dir, fname_prefix + 'graph_time_net_' + str(epoch) + '.dat')
     
     print(f"\nLoading checkpoints from epoch {epoch}...")
     
@@ -137,11 +149,11 @@ def load_model_from_checkpoint(model_dir, fname_prefix, epoch, config, device='c
     else:
         print(f"  ⚠ Label head not found, using random weights")
     
-    if os.path.exists(fname_time_head):
-        time_head.load_state_dict(torch.load(fname_time_head, map_location=device))
-        print(f"  ✓ Loaded Time Head: {fname_time_head}")
+    if os.path.exists(fname_graph_time_net):
+        graph_time_net.load_state_dict(torch.load(fname_graph_time_net, map_location=device))
+        print(f"  ✓ Loaded GraphTimeNetwork: {fname_graph_time_net}")
     else:
-        print(f"  ⚠ Time head not found, using random weights")
+        print(f"  ⚠ GraphTimeNetwork not found, using random weights")
     
     # Move to device
     if device == 'cuda':
@@ -149,12 +161,12 @@ def load_model_from_checkpoint(model_dir, fname_prefix, epoch, config, device='c
         output.cuda()
         label_embedding.cuda()
         label_head.cuda()
-        time_head.cuda()
+        graph_time_net.cuda()
     
-    return rnn, output, label_embedding, label_head, time_head
+    return rnn, output, label_embedding, label_head, graph_time_net
 
 
-def generate_graphs(rnn, output, label_embedding, label_head, time_head, 
+def generate_graphs(rnn, output, label_embedding, label_head, graph_time_net, 
                     config, id_to_label, num_graphs=10, batch_size=16):
     """Generate graphs using the loaded model."""
     
@@ -188,7 +200,7 @@ def generate_graphs(rnn, output, label_embedding, label_head, time_head,
             test_batch_size=current_batch_size,
             label_embedding=label_embedding,
             label_head=label_head,
-            time_head=time_head,
+            graph_time_net=graph_time_net,
             id_to_label=id_to_label
         )
         
@@ -289,13 +301,13 @@ def main():
         id_to_label = {i: str(i) for i in range(config.get('num_node_labels', 12))}
     
     # Load model
-    rnn, output, label_embedding, label_head, time_head = load_model_from_checkpoint(
+    rnn, output, label_embedding, label_head, graph_time_net = load_model_from_checkpoint(
         model_dir, fname_prefix, args.epoch, config, device
     )
     
     # Generate graphs
     graphs = generate_graphs(
-        rnn, output, label_embedding, label_head, time_head,
+        rnn, output, label_embedding, label_head, graph_time_net,
         config, id_to_label, 
         num_graphs=args.num_graphs,
         batch_size=args.batch_size

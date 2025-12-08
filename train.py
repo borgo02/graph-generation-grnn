@@ -432,7 +432,7 @@ def train_mlp_forward_epoch(epoch, args, rnn, output, data_loader):
 
 def train_rnn_epoch(epoch, args, rnn, output, data_loader,
                     optimizer_rnn, optimizer_output,
-                    scheduler_rnn, scheduler_output, label_embedding=None, label_head=None, time_head=None, **kwargs):
+                    scheduler_rnn, scheduler_output, label_embedding=None, label_head=None, graph_time_net=None, **kwargs):
 
     rnn.train()
     output.train()
@@ -461,11 +461,10 @@ def train_rnn_epoch(epoch, args, rnn, output, data_loader,
             x_label_unsorted = x_label_unsorted[:, 0:y_len_max]
             y_label_unsorted = y_label_unsorted[:, 0:y_len_max]
             
-        # Handle times
-        if time_head is not None:
-            x_time_unsorted = data['x_time'].float() # (batch, len, 3)
+        # Handle times (ground truth for loss computation)
+        y_time_unsorted = None
+        if graph_time_net is not None:
             y_time_unsorted = data['y_time'].float() # (batch, len, 3)
-            x_time_unsorted = x_time_unsorted[:, 0:y_len_max, :]
             y_time_unsorted = y_time_unsorted[:, 0:y_len_max, :]
 
             
@@ -481,11 +480,9 @@ def train_rnn_epoch(epoch, args, rnn, output, data_loader,
             x_label = torch.index_select(x_label_unsorted, 0, sort_index)
             y_label = torch.index_select(y_label_unsorted, 0, sort_index)
             
-        if time_head is not None:
-            x_time = torch.index_select(x_time_unsorted, 0, sort_index)
+        if graph_time_net is not None:
             y_time = torch.index_select(y_time_unsorted, 0, sort_index)
             if args.cuda:
-                x_time = x_time.cuda()
                 y_time = y_time.cuda()
 
 
@@ -526,9 +523,8 @@ def train_rnn_epoch(epoch, args, rnn, output, data_loader,
             x_label_embed = label_embedding(x_label) # (batch, len, embed_size)
             x = torch.cat((x, x_label_embed), dim=2) # (batch, len, prev_node + embed_size)
 
-        # Concatenate time features
-        if time_head is not None:
-            x = torch.cat((x, x_time), dim=2) # (batch, len, prev_node + embed_size + 3)
+        # Note: time features are NO LONGER concatenated to RNN input
+        # Times are predicted post-graph using GraphTimeNetwork
 
         h = rnn(x, pack=True, input_len=y_len)
         
@@ -565,11 +561,8 @@ def train_rnn_epoch(epoch, args, rnn, output, data_loader,
                     
                     # Apply regular step constraints (StartNode, EndNode, ParallelNode)
                     # Get time predictions for this step
+                    # Note: time constraints are computed post-graph now, not per-step
                     step_time_pred = None
-                    if time_head is not None:
-                         # packed_h.data is (total_steps, hidden)
-                         step_h_rnn = packed_h.data[start_idx:end_idx]
-                         step_time_pred = time_head(step_h_rnn) # (step_batch_size, 3)
                     
                     # Compute constraint loss for the current step
                     c_loss = constraint_manager.compute_loss(
@@ -584,15 +577,35 @@ def train_rnn_epoch(epoch, args, rnn, output, data_loader,
                     
                     start_idx = end_idx
 
-        # Time Loss
+        # Time Loss (using GraphTimeNetwork with full adjacency)
         time_loss = 0
-        if time_head is not None:
-            # h is (batch, len, hidden)
-            # Pack h to match y_time packing
-            packed_h = pack_padded_sequence(h, y_len, batch_first=True)
-            time_pred = time_head(packed_h.data)
-            y_time_packed = pack_padded_sequence(y_time, y_len, batch_first=True).data
-            time_loss = F.mse_loss(time_pred, y_time_packed)
+        if graph_time_net is not None:
+            # Build adjacency matrix from ground truth y
+            # y has shape (batch, len, max_prev_node) representing edges to previous nodes
+            batch_size = y.size(0)
+            max_len = y.size(1)
+            
+            # Create full adjacency matrix (batch, max_len, max_len)
+            adj_matrix = torch.zeros(batch_size, max_len, max_len, device=y.device)
+            for node_idx in range(1, max_len):  # Node 0 has no predecessors
+                # y[:, node_idx, :] contains edges to previous nodes
+                num_prev = min(node_idx, y.size(2))
+                for prev_offset in range(num_prev):
+                    prev_node = node_idx - 1 - prev_offset
+                    adj_matrix[:, prev_node, node_idx] = y[:, node_idx, prev_offset]
+            
+            # Predict times using graph structure
+            time_pred = graph_time_net(adj_matrix, y_label)  # (batch, max_len, 3)
+            
+            # Create mask for valid nodes
+            node_mask = torch.zeros(batch_size, max_len, device=y.device)
+            for i, length in enumerate(y_len):
+                node_mask[i, :length] = 1.0
+            
+            # Compute MSE loss only on valid nodes
+            time_diff = (time_pred - y_time) ** 2  # (batch, max_len, 3)
+            time_diff = time_diff * node_mask.unsqueeze(-1)  # Mask invalid nodes
+            time_loss = time_diff.sum() / (node_mask.sum() * 3 + 1e-6)
 
 
         h = pack_padded_sequence(h,y_len,batch_first=True).data # get packed hidden vector
@@ -619,7 +632,7 @@ def train_rnn_epoch(epoch, args, rnn, output, data_loader,
         if label_head is not None:
             loss += args.label_loss_weight * label_loss
             
-        if time_head is not None:
+        if graph_time_net is not None:
             time_weight = getattr(args, 'time_loss_weight', 1.0)
             loss += time_weight * time_loss
                         
@@ -660,11 +673,13 @@ def train_rnn_epoch(epoch, args, rnn, output, data_loader,
 
 
 
-def test_rnn_epoch(epoch, args, rnn, output, test_batch_size=16, label_embedding=None, label_head=None, time_head=None, id_to_label=None):
+def test_rnn_epoch(epoch, args, rnn, output, test_batch_size=16, label_embedding=None, label_head=None, graph_time_net=None, id_to_label=None):
 
     rnn.hidden = rnn.init_hidden(test_batch_size)
     rnn.eval()
     output.eval()
+    if graph_time_net is not None:
+        graph_time_net.eval()
 
     # generate graphs
     max_num_node = int(args.max_num_node)
@@ -689,11 +704,8 @@ def test_rnn_epoch(epoch, args, rnn, output, test_batch_size=16, label_embedding
         # Store predicted labels
         pred_labels = torch.zeros(test_batch_size, max_num_node).long()
         
-        # Store predicted times
-        pred_times = torch.zeros(test_batch_size, max_num_node, 3).float()
-        
-        # Initialize time features for first step (SOS = all zeros)
-        x_time_step = Variable(torch.zeros(test_batch_size, 1, 3)).to('cuda' if args.cuda else 'cpu')
+        # Note: times will be predicted AFTER graph structure is generated
+        # No time step initialization needed
         
         # Track sequence lengths (for early termination on END)
         lengths = torch.ones(test_batch_size, dtype=torch.long) * max_num_node
@@ -721,9 +733,7 @@ def test_rnn_epoch(epoch, args, rnn, output, test_batch_size=16, label_embedding
         else:
             x_step_input = x_step
         
-        # Concatenate time features
-        if time_head is not None:
-            x_step_input = torch.cat((x_step_input, x_time_step), dim=2)
+        # Note: time features no longer in RNN input (post-graph prediction)
             
         h = rnn(x_step_input)
         
@@ -753,12 +763,7 @@ def test_rnn_epoch(epoch, args, rnn, output, test_batch_size=16, label_embedding
             # Prepare for next step
             x_label_step = sampled_label
             
-        # Predict time for this node (i)
-        if time_head is not None:
-            time_pred = time_head(h) # (batch, 1, 3)
-            pred_times[:, i, :] = time_pred.squeeze(1).detach().cpu()
-            # Feed predicted time to next step
-            x_time_step = time_pred.detach()
+        # Note: times are predicted post-graph, not per-step
 
         
         # output.hidden = h.permute(1,0,2)
@@ -776,6 +781,27 @@ def test_rnn_epoch(epoch, args, rnn, output, test_batch_size=16, label_embedding
         y_pred_long[:, i:i + 1, :] = x_step
         rnn.hidden = Variable(rnn.hidden.data).to('cuda' if args.cuda else 'cpu')
     y_pred_long_data = y_pred_long.data.long()
+
+    # Post-graph time prediction using GraphTimeNetwork
+    pred_times = None
+    print(f"DEBUG: graph_time_net={graph_time_net is not None}, label_head={label_head is not None}")
+    if graph_time_net is not None and label_head is not None:
+        # Build adjacency matrix from generated edges
+        # y_pred_long: (batch, max_num_node, max_prev_node)
+        adj_matrix = torch.zeros(test_batch_size, max_num_node, max_num_node).to('cuda' if args.cuda else 'cpu')
+        for node_idx in range(1, max_num_node):
+            num_prev = min(node_idx, args.max_prev_node)
+            for prev_offset in range(num_prev):
+                prev_node = node_idx - 1 - prev_offset
+                adj_matrix[:, prev_node, node_idx] = y_pred_long[:, node_idx, prev_offset].float()
+        
+        # Predict times using graph structure
+        with torch.no_grad():
+            pred_times = graph_time_net(adj_matrix, pred_labels.to('cuda' if args.cuda else 'cpu'))
+        pred_times = pred_times.cpu()  # (batch, max_num_node, 3)
+        
+        # Debug: print first sample's time predictions
+        print(f"DEBUG pred_times[0]: min={pred_times[0].min().item():.4f}, max={pred_times[0].max().item():.4f}, mean={pred_times[0].mean().item():.4f}")
 
     # Generate graphs
     G_pred_list = []
@@ -796,7 +822,7 @@ def test_rnn_epoch(epoch, args, rnn, output, test_batch_size=16, label_embedding
             G_pred.add_node(0) # Minimal graph
 
 
-        # Attach labels
+        # Attach labels and times
         if label_head is not None:
             labels = pred_labels[i, :length].cpu().numpy()
             
@@ -806,13 +832,20 @@ def test_rnn_epoch(epoch, args, rnn, output, test_batch_size=16, label_embedding
                     # Assign Label
                     G_pred.nodes[idx]['label'] = int(labels[idx])
                     
-                    # Assign Times
-                    if time_head is not None:
-                        times = pred_times[i, :length].detach().cpu().numpy()
+                    # Assign Times (from post-graph prediction)
+                    if pred_times is not None:
+                        times = pred_times[i, :length].numpy()
                         if idx < len(times):
                             G_pred.nodes[idx]['norm_time'] = float(times[idx][0])
                             G_pred.nodes[idx]['trace_time'] = float(times[idx][1])
                             G_pred.nodes[idx]['prev_event_time'] = float(times[idx][2])
+                            # Debug for first graph only
+                            if i == 0 and idx == 0:
+                                print(f"DEBUG ASSIGN: graph={i}, node={idx}, times={times[idx]}")
+                    else:
+                        # Debug: pred_times is None
+                        if i == 0 and idx == 0:
+                            print(f"DEBUG: pred_times is None!")
 
 
         
@@ -904,7 +937,7 @@ def train_rnn_forward_epoch(epoch, args, rnn, output, data_loader):
 
 
 ########### train function for LSTM + VAE
-def train(args, dataset_train, rnn, output, label_embedding=None, label_head=None, time_head=None, id_to_label=None):
+def train(args, dataset_train, rnn, output, label_embedding=None, label_head=None, graph_time_net=None, id_to_label=None):
 
     # check if necessary directories exist
     if not os.path.isdir(args.model_save_path):
@@ -927,7 +960,7 @@ def train(args, dataset_train, rnn, output, label_embedding=None, label_head=Non
         fname_output = args.model_save_path + args.fname + 'output_' + str(args.load_epoch) + '.dat'
         fname_label_embed = args.model_save_path + args.fname + 'label_embedding_' + str(args.load_epoch) + '.dat'
         fname_label_head = args.model_save_path + args.fname + 'label_head_' + str(args.load_epoch) + '.dat'
-        fname_time_head = args.model_save_path + args.fname + 'time_head_' + str(args.load_epoch) + '.dat'
+        fname_graph_time_net = args.model_save_path + args.fname + 'graph_time_net_' + str(args.load_epoch) + '.dat'
         
         if os.path.exists(fname_rnn) and os.path.exists(fname_output):
             rnn.load_state_dict(torch.load(fname_rnn, map_location='cpu'))
@@ -946,11 +979,11 @@ def train(args, dataset_train, rnn, output, label_embedding=None, label_head=Non
             elif label_head is not None:
                 print(f'  WARNING: Label head checkpoint not found, using random weights')
                 
-            if time_head is not None and os.path.exists(fname_time_head):
-                time_head.load_state_dict(torch.load(fname_time_head, map_location='cpu'))
-                print(f'  Loaded Time Head: {fname_time_head}')
-            elif time_head is not None:
-                print(f'  WARNING: Time head checkpoint not found, using random weights')
+            if graph_time_net is not None and os.path.exists(fname_graph_time_net):
+                graph_time_net.load_state_dict(torch.load(fname_graph_time_net, map_location='cpu'))
+                print(f'  Loaded GraphTimeNetwork: {fname_graph_time_net}')
+            elif graph_time_net is not None:
+                print(f'  WARNING: GraphTimeNetwork checkpoint not found, using random weights')
             
             epoch = args.load_epoch + 1
             print(f'Model loaded from epoch {args.load_epoch}! Resuming from epoch {epoch}')
@@ -973,8 +1006,8 @@ def train(args, dataset_train, rnn, output, label_embedding=None, label_head=Non
         optimizer_rnn.add_param_group({'params': label_embedding.parameters()})
     if label_head is not None:
         optimizer_output.add_param_group({'params': label_head.parameters()})
-    if time_head is not None:
-        optimizer_output.add_param_group({'params': time_head.parameters()})
+    if graph_time_net is not None:
+        optimizer_output.add_param_group({'params': graph_time_net.parameters()})
 
 
     scheduler_rnn = MultiStepLR(optimizer_rnn, milestones=args.milestones, gamma=args.lr_rate)
@@ -996,7 +1029,7 @@ def train(args, dataset_train, rnn, output, label_embedding=None, label_head=Non
         elif 'GraphRNN_RNN' in args.note:
             train_rnn_epoch(epoch, args, rnn, output, dataset_train,
                             optimizer_rnn, optimizer_output,
-                            scheduler_rnn, scheduler_output, label_embedding=label_embedding, label_head=label_head, time_head=time_head, id_to_label=id_to_label)
+                            scheduler_rnn, scheduler_output, label_embedding=label_embedding, label_head=label_head, graph_time_net=graph_time_net, id_to_label=id_to_label)
 
         time_end = tm.time()
         time_all[epoch - 1] = time_end - time_start
@@ -1010,7 +1043,7 @@ def train(args, dataset_train, rnn, output, label_embedding=None, label_head=Non
                     elif 'GraphRNN_MLP' in args.note:
                         G_pred_step = test_mlp_epoch(epoch, args, rnn, output, test_batch_size=args.test_batch_size,sample_time=sample_time)
                     elif 'GraphRNN_RNN' in args.note:
-                        G_pred_step = test_rnn_epoch(epoch, args, rnn, output, test_batch_size=args.test_batch_size, label_embedding=label_embedding, label_head=label_head, time_head=time_head, id_to_label=id_to_label)
+                        G_pred_step = test_rnn_epoch(epoch, args, rnn, output, test_batch_size=args.test_batch_size, label_embedding=label_embedding, label_head=label_head, graph_time_net=graph_time_net, id_to_label=id_to_label)
 
                     
                     # Filter graphs
@@ -1049,9 +1082,9 @@ def train(args, dataset_train, rnn, output, label_embedding=None, label_head=Non
                 if label_head is not None:
                     fname = args.model_save_path + args.fname + 'label_head_' + str(epoch) + '.dat'
                     torch.save(label_head.state_dict(), fname)
-                if time_head is not None:
-                    fname = args.model_save_path + args.fname + 'time_head_' + str(epoch) + '.dat'
-                    torch.save(time_head.state_dict(), fname)
+                if graph_time_net is not None:
+                    fname = args.model_save_path + args.fname + 'graph_time_net_' + str(epoch) + '.dat'
+                    torch.save(graph_time_net.state_dict(), fname)
         epoch += 1
     np.save(args.timing_save_path+args.fname,time_all)
 

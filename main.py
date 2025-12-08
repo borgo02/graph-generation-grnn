@@ -151,8 +151,8 @@ if __name__ == '__main__':
                         has_output=False)
         output = MLP_plain(h_size=args.hidden_size_rnn, embedding_size=args.embedding_size_output, y_size=args.max_prev_node)
     elif 'GraphRNN_RNN' in args.note:
-        # Input: edge adjacency + label embedding + 3 time features (norm_time, trace_time, prev_event_time)
-        rnn = GRU_plain(input_size=args.max_prev_node + args.label_embedding_size + 3, embedding_size=args.embedding_size_rnn,
+        # Input: edge adjacency + label embedding (no time features - times are predicted post-graph)
+        rnn = GRU_plain(input_size=args.max_prev_node + args.label_embedding_size, embedding_size=args.embedding_size_rnn,
                         hidden_size=args.hidden_size_rnn, num_layers=args.num_layers, has_input=True,
                         has_output=True, output_size=args.hidden_size_rnn_output)
         output = GRU_plain(input_size=1, embedding_size=args.embedding_size_rnn_output,
@@ -162,7 +162,16 @@ if __name__ == '__main__':
     ### label prediction components
     label_embedding = nn.Embedding(args.num_node_labels, args.label_embedding_size)
     label_head = MLP_plain(h_size=args.hidden_size_rnn_output, embedding_size=args.embedding_size_output, y_size=args.num_node_labels)
-    time_head = MLP_plain(h_size=args.hidden_size_rnn_output, embedding_size=args.embedding_size_output, y_size=3)
+    
+    # GraphTimeNetwork: predicts times after graph structure is generated
+    graph_time_net = GraphTimeNetwork(
+        num_labels=args.num_node_labels,
+        label_embed_dim=args.label_embedding_size,
+        hidden_dim=getattr(args, 'graph_time_hidden_dim', 64),
+        num_iterations=getattr(args, 'graph_time_iterations', 3),
+        num_time_features=3,
+        max_nodes=args.max_num_node
+    )
 
 
     if args.cuda:
@@ -170,14 +179,14 @@ if __name__ == '__main__':
         output.cuda()
         label_embedding.cuda()
         label_head.cuda()
-        time_head.cuda()
+        graph_time_net.cuda()
 
 
     ### start training
     # Create id_to_label mapping
     id_to_label = {v: k for k, v in dataset.label_to_id.items()}
     
-    train(args, dataset_loader, rnn, output, label_embedding, label_head, time_head, id_to_label)
+    train(args, dataset_loader, rnn, output, label_embedding, label_head, graph_time_net, id_to_label)
 
 
     ### graph completion

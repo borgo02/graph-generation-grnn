@@ -18,6 +18,10 @@ label_embedding_size: 8
 label_loss_weight: 1.0
 time_loss_weight: 1.0
 
+# Graph Time Network (predicts times using graph structure)
+graph_time_hidden_dim: 64
+graph_time_iterations: 3
+
 min_gen_node_count: 5
 max_gen_node_count: 7
 
@@ -41,11 +45,11 @@ num_workers: 4
 batch_ratio: 64
 
 epochs: 300
-epochs_test_start: 50
-epochs_test: 50
-epochs_log: 50
+epochs_test_start: 20
+epochs_test: 20
+epochs_log: 20
 
-epochs_save: 50
+epochs_save: 20
 lr: 0.003
 lr_rate: 0.3
 milestones: [400, 1000]

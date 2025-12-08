@@ -340,7 +340,97 @@ class MLP_plain(nn.Module):
         y = self.deterministic_output(h)
         return y
 
+
+class GraphTimeNetwork(nn.Module):
+    """
+    Predicts time features for all nodes given full graph structure.
+    
+    Uses node position (BFS order) as the primary signal for time prediction.
+    Later nodes in BFS order naturally have larger times.
+    
+    Key insight: In BFS ordering, node index is a proxy for topological depth,
+    so we can use normalized position as a base for time prediction.
+    """
+    
+    def __init__(self, num_labels, label_embed_dim=16, hidden_dim=64, 
+                 num_iterations=3, num_time_features=3, max_nodes=20):
+        super(GraphTimeNetwork, self).__init__()
+        self.num_time_features = num_time_features
+        self.max_nodes = max_nodes
+        
+        # Label embedding
+        self.label_embedding = nn.Embedding(num_labels, label_embed_dim)
+        
+        # Position embedding
+        self.position_embedding = nn.Embedding(max_nodes, label_embed_dim)
+        
+        # MLP to predict time offset from base position
+        # Input: label + position + normalized_position_scalar
+        input_dim = label_embed_dim * 2 + 1  # +1 for normalized position
+        self.time_mlp = nn.Sequential(
+            nn.Linear(input_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, num_time_features)
+        )
+        
+        # Initialize weights
+        for m in self.modules():
+            if isinstance(m, nn.Linear):
+                init.xavier_uniform_(m.weight.data, gain=nn.init.calculate_gain('relu'))
+    
+    def forward(self, adjacency, node_labels, node_mask=None):
+        """
+        Args:
+            adjacency: (batch, num_nodes, num_nodes) - edge probabilities (unused for now)
+            node_labels: (batch, num_nodes) - label IDs for each node
+            node_mask: (batch, num_nodes) - optional mask for valid nodes
+        
+        Returns:
+            times: (batch, num_nodes, 3) - predicted time features
+                   (norm_time, trace_time, prev_event_time)
+        """
+        batch_size, num_nodes = node_labels.shape
+        device = node_labels.device
+        
+        # Get label embeddings
+        label_features = self.label_embedding(node_labels)  # (batch, num_nodes, embed_dim)
+        
+        # Get position embeddings and normalized position
+        positions = torch.arange(num_nodes, device=device).unsqueeze(0).expand(batch_size, -1)
+        positions_clamped = positions.clamp(max=self.max_nodes - 1)
+        position_features = self.position_embedding(positions_clamped)  # (batch, num_nodes, embed_dim)
+        
+        # Normalized position (0 to 1 based on node index)
+        # This gives a strong monotonicity prior
+        norm_positions = positions.float() / max(num_nodes - 1, 1)  # (batch, num_nodes)
+        norm_positions = norm_positions.unsqueeze(-1)  # (batch, num_nodes, 1)
+        
+        # Combine features
+        combined = torch.cat([label_features, position_features, norm_positions], dim=-1)
+        
+        # Predict time offsets
+        time_offsets = self.time_mlp(combined)  # (batch, num_nodes, 3)
+        
+        # Base times from normalized position (ensures monotonicity)
+        # Scale offsets with sigmoid and add small learned adjustment
+        base_times = norm_positions.expand(-1, -1, self.num_time_features)  # (batch, num_nodes, 3)
+        
+        # Final times: blend base position with learned offset
+        # sigmoid(offset) * 0.2 gives small adjustment range around base
+        times = base_times + 0.2 * torch.sigmoid(time_offsets) - 0.1  # Centered adjustment
+        times = times.clamp(0, 1)  # Ensure in [0, 1]
+        
+        # Apply mask if provided
+        if node_mask is not None:
+            times = times * node_mask.unsqueeze(-1).float()
+        
+        return times
+
+
 # a deterministic linear output, additional output indicates if the sequence should continue grow
+
 class MLP_token_plain(nn.Module):
     def __init__(self, h_size, embedding_size, y_size):
         super(MLP_token_plain, self).__init__()
