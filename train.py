@@ -784,7 +784,6 @@ def test_rnn_epoch(epoch, args, rnn, output, test_batch_size=16, label_embedding
 
     # Post-graph time prediction using GraphTimeNetwork
     pred_times = None
-    print(f"DEBUG: graph_time_net={graph_time_net is not None}, label_head={label_head is not None}")
     if graph_time_net is not None and label_head is not None:
         # Build adjacency matrix from generated edges
         # y_pred_long: (batch, max_num_node, max_prev_node)
@@ -799,9 +798,6 @@ def test_rnn_epoch(epoch, args, rnn, output, test_batch_size=16, label_embedding
         with torch.no_grad():
             pred_times = graph_time_net(adj_matrix, pred_labels.to('cuda' if args.cuda else 'cpu'))
         pred_times = pred_times.cpu()  # (batch, max_num_node, 3)
-        
-        # Debug: print first sample's time predictions
-        print(f"DEBUG pred_times[0]: min={pred_times[0].min().item():.4f}, max={pred_times[0].max().item():.4f}, mean={pred_times[0].mean().item():.4f}")
 
     # Generate graphs
     G_pred_list = []
@@ -839,13 +835,6 @@ def test_rnn_epoch(epoch, args, rnn, output, test_batch_size=16, label_embedding
                             G_pred.nodes[idx]['norm_time'] = float(times[idx][0])
                             G_pred.nodes[idx]['trace_time'] = float(times[idx][1])
                             G_pred.nodes[idx]['prev_event_time'] = float(times[idx][2])
-                            # Debug for first graph only
-                            if i == 0 and idx == 0:
-                                print(f"DEBUG ASSIGN: graph={i}, node={idx}, times={times[idx]}")
-                    else:
-                        # Debug: pred_times is None
-                        if i == 0 and idx == 0:
-                            print(f"DEBUG: pred_times is None!")
 
 
         
