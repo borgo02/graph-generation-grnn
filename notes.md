@@ -57,6 +57,14 @@ graph sample from p(data) distribution --> learn the distribution --> generate n
     1) Earth Mover Distance (EMD) --> measure discrepancy between 2 distributions
     2) Maximum Mean Discrepancy (MMD) based on EMD --> distance between mean embeddings of features
 
+### Evaluation
+- Maximum Mean Discrepancy (MMD) --> closer to 0 is better and similar to dataset
+- Clustering Coefficient MMD --> low value means generated graphs have similar local structure density – triangles and tightly-knit communities are formed similarly
+- Orbit MMD --> it captures higher-order patterns like paths, cycles, stars, cliques, and their combinations --> low value better
+- Uniqueness Analysis
+- Average Generalization (AG) --> Linear chain A→B→C: AG=1 (only one sequence). Fork-join A→{B,C}→D: AG=2 (can be A-B-C-D or A-C-B-D)
+- Accuracy (Acc) --> 100% accuracy means the model perfectly reconstructs all target graphs
+- Matching Cost (MC) --> for reconstructing a target graph from a generated graph
 
 ### Future Work
 - Graph Convolutional Policy Network (GCPN) 

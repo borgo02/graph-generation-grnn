@@ -5,7 +5,7 @@ Usage:
     python evaluate_run.py --run_id <run_folder_name> --epoch <epoch_to_evaluate> --with-ig-metrics
     
 Example:
-    python evaluate_run.py --run_id GraphRNN_RNN_helpdesk_4_128_2025-12-07_11-44-02 --epoch 300 --with-ig-metrics
+    python evaluate_run.py --run_id GraphRNN_RNN_helpdesk_4_128_2025-12-07_11-44-02 --epoch 300 --with-ig-metrics --ground-truth
 """
 import argparse
 import os
@@ -219,11 +219,20 @@ def main():
         print("INSTANCE GRAPH METRICS")
         print("=" * 60)
         
-        # Load ground truth if provided (for Accuracy and Matching Cost)
+        # Load ground truth for Accuracy and Matching Cost
         true_graphs = None
         if args.ground_truth and os.path.exists(args.ground_truth):
             true_graphs = load_graphs(args.ground_truth)
-            print(f"Loaded {len(true_graphs)} ground truth graphs")
+            print(f"Loaded {len(true_graphs)} ground truth graphs from file")
+        else:
+            # Use test set as ground truth (sample to match prediction count)
+            n_pred = len(graph_pred)
+            if len(graph_test) >= n_pred:
+                true_graphs = graph_test[:n_pred]
+                print(f"Using {n_pred} test graphs as ground truth")
+            else:
+                true_graphs = graph_test
+                print(f"Using all {len(graph_test)} test graphs as ground truth")
         
         ig_results = eval.ig_metrics.evaluate_instance_graphs(
             pred_graphs=graph_pred,
