@@ -67,4 +67,10 @@ graph sample from p(data) distribution --> learn the distribution --> generate n
 - Matching Cost (MC) --> for reconstructing a target graph from a generated graph
 
 ### Future Work
-- Graph Convolutional Policy Network (GCPN) 
+- Graph Convolutional Policy Network (GCPN)
+- https://kumo.ai
+
+Sfondo bianco o comunque chiaro
+non troppo testo per slide
+modello unico --> parlare di training per ogni size del grafo (ensemble)
+max_prev_node --> spiegare
