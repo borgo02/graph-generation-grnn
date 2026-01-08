@@ -472,6 +472,10 @@ class GraphTimeNetwork(nn.Module):
         
         # Final times: base depth + small learned offset
         times = base_times + 0.2 * torch.sigmoid(time_offsets) - 0.1
+        
+        # Hard constraint: Node 0 (START) must be 0.0
+        times[:, 0, :] = 0.0
+        
         times = times.clamp(0, 1)
         
         # Apply mask if provided

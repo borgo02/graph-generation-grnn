@@ -47,7 +47,7 @@ graph sample from p(data) distribution --> learn the distribution --> generate n
 - teacher forcing --> technique of features forcing --> replace input and output with real sequence TO CHECK
     --> instead of using predicted output as input for the next step, we use the real output --> teacher forcing the student --> correct the output of each step to avoind having the issue to all the steps
 - Binary Cross Entropy (TO CHECK) --> loss function --> will adjust RNN parameters accordingly using back propagation
-
+- add custom constraint manager, label prediction and time prediction
 
 ### Scaling Up and evaluation of graph generation
 - we limit complety with max_prev_nodes --> otherwise last added node will check if should be connected also to the first node --> we limit the check to the last X nodes
@@ -72,5 +72,10 @@ graph sample from p(data) distribution --> learn the distribution --> generate n
 
 Sfondo bianco o comunque chiaro
 non troppo testo per slide
-modello unico --> parlare di training per ogni size del grafo (ensemble)
-max_prev_node --> spiegare
+modello unico --> parlare di training per ogni size del grafo (ensemble) --> PRE-GraphRNN
+parlare dei motivi che portano alla graphRNN
+max_prev_node --> spiegare che controlla questo numero di nodi per vedere se collegare o meno
+parlare di constraint, label prediction e time predictions
+### Future Work
+- Graph Convolutional Policy Network (GCPN)
+- https://kumo.ai

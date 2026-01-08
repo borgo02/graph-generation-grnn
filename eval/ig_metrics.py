@@ -207,6 +207,81 @@ def compute_matching_cost_batch(true_graphs: List[nx.DiGraph],
     }
 
 
+def compute_matching_cost_best(true_graphs: List[nx.DiGraph],
+                               pred_graphs: List[nx.DiGraph],
+                               timeout_per_pair: float = 5.0) -> dict:
+    """
+    Compute matching cost statistics using a 'Best Match' strategy.
+    
+    For each predicted graph, we find the ground truth graph that minimizes
+    the graph edit distance. This is O(N*M) and can be very slow.
+    
+    Args:
+        true_graphs: List of ground truth graphs
+        pred_graphs: List of predicted graphs
+        timeout_per_pair: Timeout for each GED computation
+        
+    Returns:
+        Dictionary with: mean, median, std, total, count, failed
+    """
+    costs = []
+    failed = 0
+    
+    print(f"  Computing Best Match MC for {len(pred_graphs)} graphs against {len(true_graphs)} true graphs...")
+    
+    for i, pred_g in enumerate(pred_graphs):
+        best_cost = float('inf')
+        found_match = False
+        
+        # Optimization: Filter potential matches by simple properties first?
+        # For now, we do brute force but with early exit if cost is 0
+        
+        for true_g in true_graphs:
+            # Quick check for isomorphism (cost 0)
+            if is_labeled_isomorphic(pred_g, true_g):
+                best_cost = 0
+                found_match = True
+                break
+                
+            # Compute GED
+            mc = compute_matching_cost(true_g, pred_g, timeout=timeout_per_pair)
+            
+            if mc is not None:
+                if mc < best_cost:
+                    best_cost = mc
+                    found_match = True
+            
+        if found_match and best_cost != float('inf'):
+            costs.append(best_cost)
+        else:
+            # If we couldn't compute specific costs due to timeouts using all candidates,
+            # or if the lists are empty.
+            failed += 1
+            
+        if (i + 1) % 10 == 0:
+            print(f"    Processed {i + 1}/{len(pred_graphs)}...")
+
+    if not costs:
+        return {
+            'mean': float('nan'),
+            'median': float('nan'),
+            'std': float('nan'),
+            'total': 0,
+            'count': 0,
+            'failed': failed
+        }
+    
+    return {
+        'mean': np.mean(costs),
+        'median': np.median(costs),
+        'std': np.std(costs),
+        'total': sum(costs),
+        'count': len(costs),
+        'failed': failed,
+        'costs': costs
+    }
+
+
 # ============================================================================
 # AVERAGE GENERALIZATION
 # ============================================================================
@@ -456,7 +531,8 @@ def evaluate_instance_graphs(pred_graphs: List[nx.DiGraph],
                               true_graphs: Optional[List[nx.DiGraph]] = None,
                               compute_ag: bool = True,
                               ag_max_count: int = 10000,
-                              mc_timeout: float = 5.0) -> dict:
+                              mc_timeout: float = 5.0,
+                              match_strategy: str = 'index') -> dict:
     """
     Comprehensive evaluation of Instance Graphs.
     
@@ -466,6 +542,7 @@ def evaluate_instance_graphs(pred_graphs: List[nx.DiGraph],
         compute_ag: Whether to compute Average Generalization
         ag_max_count: Max count for AG computation
         mc_timeout: Timeout for MC (GED) computation per pair
+        match_strategy: 'index' (compare i-th with i-th) or 'best' (find closest match)
         
     Returns:
         Dictionary with all evaluation metrics
@@ -493,8 +570,9 @@ def evaluate_instance_graphs(pred_graphs: List[nx.DiGraph],
         results['num_true'] = len(true_graphs)
         
         # Accuracy
-        print("\nComputing Accuracy...")
-        acc_count, acc_pct = compute_accuracy(true_graphs, pred_graphs)
+        print(f"\nComputing Accuracy (Strategy: {match_strategy})...")
+        match_by_index = (match_strategy == 'index')
+        acc_count, acc_pct = compute_accuracy(true_graphs, pred_graphs, match_by_index=match_by_index)
         results['accuracy'] = {
             'count': acc_count,
             'percentage': acc_pct
@@ -502,11 +580,19 @@ def evaluate_instance_graphs(pred_graphs: List[nx.DiGraph],
         print(f"  Correct: {acc_count}/{len(true_graphs)} ({acc_pct:.1f}%)")
         
         # Matching Cost
-        print("\nComputing Matching Cost (this may take a while)...")
-        mc_results = compute_matching_cost_batch(
-            true_graphs, pred_graphs, 
-            timeout_per_pair=mc_timeout
-        )
+        print(f"\nComputing Matching Cost (Strategy: {match_strategy})...")
+        print("Note: 'best' strategy is computationally expensive (O(NxM)).")
+        
+        if match_strategy == 'best':
+            mc_results = compute_matching_cost_best(
+                true_graphs, pred_graphs,
+                timeout_per_pair=mc_timeout
+            )
+        else:
+            mc_results = compute_matching_cost_batch(
+                true_graphs, pred_graphs, 
+                timeout_per_pair=mc_timeout
+            )
         results['matching_cost'] = {
             'mean': mc_results['mean'],
             'median': mc_results['median'],

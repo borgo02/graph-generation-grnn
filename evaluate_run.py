@@ -123,6 +123,8 @@ def main():
                         help='Path to ground truth graphs file (for Accuracy/MC metrics)')
     parser.add_argument('--mc-timeout', type=float, default=5.0,
                         help='Timeout per graph for Matching Cost computation (default: 5.0s)')
+    parser.add_argument('--match-strategy', type=str, choices=['index', 'best'], default='index',
+                        help='Strategy for matching graphs: "index" (strict 1-to-1) or "best" (nearest neighbor). Default: index')
     
     args = parser.parse_args()
     
@@ -238,7 +240,8 @@ def main():
             pred_graphs=graph_pred,
             true_graphs=true_graphs,
             compute_ag=True,
-            mc_timeout=args.mc_timeout
+            mc_timeout=args.mc_timeout,
+            match_strategy=args.match_strategy
         )
     
     # Summary
