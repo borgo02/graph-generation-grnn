@@ -176,13 +176,10 @@ class StartTimeConstraint(GraphConstraint):
         time_pred = kwargs.get('time_pred') # (batch, 3)
         
         if step == 0 and time_pred is not None:
-            # time_pred is [norm_time, trace_time, prev_event_time]
-            # We want trace_time (idx 1) and prev_event_time (idx 2) to be 0.0
-            
-            # Target is 0.0 for indices 1 and 2
             target = torch.zeros_like(time_pred[:, 1:])
             loss = F.mse_loss(time_pred[:, 1:], target)
             return loss
+
             
         return 0.0
 

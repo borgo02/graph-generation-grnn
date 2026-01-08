@@ -815,18 +815,16 @@ def test_rnn_epoch(epoch, args, rnn, output, test_batch_size=16, label_embedding
             G_pred.add_node(0) # Minimal graph
 
 
-        # Attach labels and times
+
         if label_head is not None:
             labels = pred_labels[i, :length].cpu().numpy()
             
-            # Assign predicted labels and times to Nodes 0..length-1
             for idx in range(length):
                 if idx < G_pred.number_of_nodes():
-                    # Assign Label
                     G_pred.nodes[idx]['label'] = int(labels[idx])
                     
-                    # Assign Times (from post-graph prediction)
                     if pred_times is not None:
+
                         times = pred_times[i, :length].numpy()
                         if idx < len(times):
                             G_pred.nodes[idx]['norm_time'] = float(times[idx][0])
