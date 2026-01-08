@@ -797,8 +797,8 @@ class Graph_RNN_structure(nn.Module):
         hidden_all_cat = torch.cat(self.hidden_all, dim=2)
         # print(hidden_all_cat.size())
 
-        # print('hidden_all_cat',hidden_all_cat.size())
         # att_weight size: batch*1*current_num_nodes
+
         for i in range(self.num_layers-1):
             hidden_all_cat = self.conv_block[i](hidden_all_cat)
             if self.is_bn:
@@ -806,28 +806,6 @@ class Graph_RNN_structure(nn.Module):
             hidden_all_cat = self.relu(hidden_all_cat)
         x_pred = self.conv_out(hidden_all_cat)
         # 2 then compute output, using a gru
-        # first try the simple version, directly give the edge prediction
-        # x_pred = self.linear_output_simple(hidden_new)
-        # x_pred = x_pred.view(x_pred.size(0),1,x_pred.size(1))
-
-        # todo: use a gru version output
-        # if sample==False:
-        #     # when training: we know the ground truth, input the sequence at once
-        #     y_pred,_ = self.gru_output(x, hidden_new.permute(2,0,1))
-        #     y_pred = self.linear_output(y_pred)
-        # else:
-        #     # when validating, we need to sampling at each time step
-        #     y_pred = Variable(torch.zeros(x.size(0), x.size(1), x.size(2))).cuda()
-        #     y_pred_long = Variable(torch.zeros(x.size(0), x.size(1), x.size(2))).cuda()
-        #     x_step = x[:, 0:1, :]
-        #     for i in range(x.size(1)):
-        #         y_step,_ = self.gru_output(x_step)
-        #         y_step = self.linear_output(y_step)
-        #         y_pred[:, i, :] = y_step
-        #         y_step = F.sigmoid(y_step)
-        #         x_step = sample(y_step, sample=True, thresh=0.45)
-        #         y_pred_long[:, i, :] = x_step
-        #     pass
 
 
         # 3 then update self.hidden_all list
@@ -873,20 +851,10 @@ class Graph_RNN_structure(nn.Module):
         self.hidden_all.append(hidden_new)
 
         # 4 return prediction
-        # print('x_pred',x_pred)
-        # print('x_pred_mean', torch.mean(x_pred))
-        # print('x_pred_sample_mean', torch.mean(x_pred_sample))
+
         return x_pred, x_pred_sample
 
-# batch_size = 8
-# output_size = 4
-# generator = Graph_RNN_structure(hidden_size=16, batch_size=batch_size, output_size=output_size, num_layers=1).cuda()
-# for i in range(4):
-#     generator.hidden_all.append(generator.init_hidden())
-#
-# x = Variable(torch.rand(batch_size,1,output_size)).cuda()
-# x_pred = generator(x,teacher_forcing=True, sample=True)
-# print(x_pred)
+
 
 
 
@@ -1060,11 +1028,7 @@ class GCN_encoder_graph(nn.Module):
         # print(out)
         return output
 
-# x = Variable(torch.rand(1,8,10)).cuda()
-# adj = Variable(torch.rand(1,8,8)).cuda()
-# model = GCN_encoder_graph(10,10,10).cuda()
-# y = model(x,adj)
-# print(y.size())
+
 
 
 def preprocess(A):
@@ -1476,10 +1440,7 @@ class CNN_decoder_attention(nn.Module):
 
 
 
-#### test code ####
-# x = Variable(torch.randn(1, 256, 1)).cuda()
-# decoder = CNN_decoder(256, 16).cuda()
-# y = decoder(x)
+
 
 class Graphsage_Encoder(nn.Module):
     def __init__(self, feature_size, input_size, layer_num):

@@ -6,7 +6,7 @@ Implements metrics from the paper for evaluating Instance Graphs:
 - Matching Cost (MC): Graph edit distance between generated and true IGs
 - Average Generalization (AG): Number of occurrence sequences per IG
 
-Author: Generated for graph-generation-grnn evaluation
+
 """
 
 import networkx as nx

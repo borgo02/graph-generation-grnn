@@ -523,8 +523,7 @@ def train_rnn_epoch(epoch, args, rnn, output, data_loader,
             x_label_embed = label_embedding(x_label) # (batch, len, embed_size)
             x = torch.cat((x, x_label_embed), dim=2) # (batch, len, prev_node + embed_size)
 
-        # Note: time features are NO LONGER concatenated to RNN input
-        # Times are predicted post-graph using GraphTimeNetwork
+
 
         h = rnn(x, pack=True, input_len=y_len)
         
@@ -561,7 +560,6 @@ def train_rnn_epoch(epoch, args, rnn, output, data_loader,
                     
                     # Apply regular step constraints (StartNode, EndNode, ParallelNode)
                     # Get time predictions for this step
-                    # Note: time constraints are computed post-graph now, not per-step
                     step_time_pred = None
                     
                     # Compute constraint loss for the current step
@@ -704,8 +702,7 @@ def test_rnn_epoch(epoch, args, rnn, output, test_batch_size=16, label_embedding
         # Store predicted labels
         pred_labels = torch.zeros(test_batch_size, max_num_node).long()
         
-        # Note: times will be predicted AFTER graph structure is generated
-        # No time step initialization needed
+
         
         # Track sequence lengths (for early termination on END)
         lengths = torch.ones(test_batch_size, dtype=torch.long) * max_num_node
@@ -733,7 +730,7 @@ def test_rnn_epoch(epoch, args, rnn, output, test_batch_size=16, label_embedding
         else:
             x_step_input = x_step
         
-        # Note: time features no longer in RNN input (post-graph prediction)
+
             
         h = rnn(x_step_input)
         
@@ -763,7 +760,7 @@ def test_rnn_epoch(epoch, args, rnn, output, test_batch_size=16, label_embedding
             # Prepare for next step
             x_label_step = sampled_label
             
-        # Note: times are predicted post-graph, not per-step
+
 
         
         # output.hidden = h.permute(1,0,2)

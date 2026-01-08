@@ -152,12 +152,10 @@ class ParallelNodeConstraint(GraphConstraint):
             
             # Compute loss against siblings
             if siblings:
-                # Average time of siblings? Or minimize distance to each?
-                # Let's minimize distance to the closest sibling or average?
-                # User said "same numbers", so they should be close.
-                # Let's take the mean of siblings' times
+                # Average time of siblings
                 sibling_times = time_gt[b, siblings, :] # (num_siblings, 3)
                 target_time = sibling_times.mean(dim=0)
+
                 
                 loss += F.mse_loss(time_pred[b], target_time)
                 count += 1

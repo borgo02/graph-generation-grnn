@@ -80,7 +80,8 @@ def load_model_from_checkpoint(model_dir, fname_prefix, epoch, config, device='c
     print(f"  num_layers: {num_layers}")
     print(f"  num_node_labels: {num_node_labels}")
     
-    # Create models (no time features in RNN input - times are predicted post-graph)
+    # Create models
+
     rnn = GRU_plain(
         input_size=max_prev_node + label_embedding_size, 
         embedding_size=embedding_size_rnn,
@@ -104,7 +105,8 @@ def load_model_from_checkpoint(model_dir, fname_prefix, epoch, config, device='c
     label_embedding = nn.Embedding(num_node_labels, label_embedding_size)
     label_head = MLP_plain(h_size=hidden_size_rnn_output, embedding_size=embedding_size_output, y_size=num_node_labels)
     
-    # GraphTimeNetwork: predicts times after graph structure is generated
+    # GraphTimeNetwork
+
     graph_time_hidden = config.get('graph_time_hidden_dim', 64)
     graph_time_iterations = config.get('graph_time_iterations', 3)
     max_num_node = config.get('max_num_node', 7)
@@ -343,5 +345,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
-#sample command

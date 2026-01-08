@@ -21,7 +21,7 @@ if __name__ == '__main__':
         os.makedirs(args.nll_save_path)
 
     time = strftime("%Y-%m-%d %H:%M:%S", gmtime())
-    # logging.basicConfig(filename='logs/train' + time + '.log', level=logging.DEBUG)
+
     if args.clean_tensorboard:
         if os.path.isdir("tensorboard"):
             shutil.rmtree("tensorboard")
@@ -43,13 +43,7 @@ if __name__ == '__main__':
     graphs_validate = graphs[0:int(0.2*graphs_len)]
 
     # if use pre-saved graphs
-    # dir_input = "/dfs/scratch0/jiaxuany0/graphs/"
-    # fname_test = dir_input + args.note + '_' + args.graph_type + '_' + str(args.num_layers) + '_' + str(
-    #     args.hidden_size_rnn) + '_test_' + str(0) + '.dat'
-    # graphs = load_graph_list(fname_test, is_real=True)
-    # graphs_test = graphs[int(0.8 * graphs_len):]
-    # graphs_train = graphs[0:int(0.8 * graphs_len)]
-    # graphs_validate = graphs[int(0.2 * graphs_len):int(0.4 * graphs_len)]
+
 
 
     graph_validate_len = 0
@@ -71,7 +65,7 @@ if __name__ == '__main__':
     max_num_edge = max([graphs[i].number_of_edges() for i in range(len(graphs))])
     min_num_edge = min([graphs[i].number_of_edges() for i in range(len(graphs))])
 
-    # args.max_num_node = 2000
+
     # show graphs statistics
     print('total graph num: {}, training set: {}'.format(len(graphs),len(graphs_train)))
     print('max number node: {}'.format(args.max_num_node))
@@ -84,17 +78,7 @@ if __name__ == '__main__':
     save_graph_list(graphs, args.graph_save_path + args.fname_test + '0.dat')
     print('train and test graphs saved at: ', args.graph_save_path + args.fname_test + '0.dat')
 
-    ### comment when normal training, for graph completion only
-    # p = 0.5
-    # for graph in graphs_train:
-    #     for node in list(graph.nodes()):
-    #         # print('node',node)
-    #         if np.random.rand()>p:
-    #             graph.remove_node(node)
-        # for edge in list(graph.edges()):
-        #     # print('edge',edge)
-        #     if np.random.rand()>p:
-        #         graph.remove_edge(edge[0],edge[1])
+
 
 
     ### dataset initialization
@@ -137,8 +121,7 @@ if __name__ == '__main__':
 
     ### model initialization
     ## Graph RNN VAE model
-    # lstm = LSTM_plain(input_size=args.max_prev_node, embedding_size=args.embedding_size_lstm,
-    #                   hidden_size=args.hidden_size, num_layers=args.num_layers).cuda()
+
 
     if 'GraphRNN_VAE_conditional' in args.note:
         rnn = GRU_plain(input_size=args.max_prev_node, embedding_size=args.embedding_size_rnn,
@@ -151,7 +134,8 @@ if __name__ == '__main__':
                         has_output=False)
         output = MLP_plain(h_size=args.hidden_size_rnn, embedding_size=args.embedding_size_output, y_size=args.max_prev_node)
     elif 'GraphRNN_RNN' in args.note:
-        # Input: edge adjacency + label embedding (no time features - times are predicted post-graph)
+        # Input: edge adjacency + label embedding
+
         rnn = GRU_plain(input_size=args.max_prev_node + args.label_embedding_size, embedding_size=args.embedding_size_rnn,
                         hidden_size=args.hidden_size_rnn, num_layers=args.num_layers, has_input=True,
                         has_output=True, output_size=args.hidden_size_rnn_output)
@@ -163,7 +147,8 @@ if __name__ == '__main__':
     label_embedding = nn.Embedding(args.num_node_labels, args.label_embedding_size)
     label_head = MLP_plain(h_size=args.hidden_size_rnn_output, embedding_size=args.embedding_size_output, y_size=args.num_node_labels)
     
-    # GraphTimeNetwork: predicts times after graph structure is generated
+    # GraphTimeNetwork
+
     graph_time_net = GraphTimeNetwork(
         num_labels=args.num_node_labels,
         label_embed_dim=args.label_embedding_size,
@@ -189,9 +174,5 @@ if __name__ == '__main__':
     train(args, dataset_loader, rnn, output, label_embedding, label_head, graph_time_net, id_to_label)
 
 
-    ### graph completion
-    # train_graph_completion(args,dataset_loader,rnn,output)
 
-    ### nll evaluation
-    # train_nll(args, dataset_loader, dataset_loader, rnn, output, max_iter = 200, graph_validate_len=graph_validate_len,graph_test_len=graph_test_len)
 

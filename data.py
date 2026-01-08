@@ -40,10 +40,8 @@ def Graph_load_batch(min_num_nodes = 20, max_num_nodes = 1000, name = 'ENZYMES',
 
 
     data_tuple = list(map(tuple, data_adj))
-    # print(len(data_tuple))
-    # print(data_tuple[0])
-
     # add edges
+
     G.add_edges_from(data_tuple)
     # add node attributes
     for i in range(data_node_label.shape[0]):
@@ -52,10 +50,8 @@ def Graph_load_batch(min_num_nodes = 20, max_num_nodes = 1000, name = 'ENZYMES',
         G.add_node(i+1, label = data_node_label[i])
     G.remove_nodes_from(list(nx.isolates(G)))
 
-    # print(G.number_of_nodes())
-    # print(G.number_of_edges())
-
     # split into graphs
+
     graph_num = data_graph_indicator.max()
     node_list = np.arange(data_graph_indicator.shape[0])+1
     graphs = []
@@ -66,17 +62,13 @@ def Graph_load_batch(min_num_nodes = 20, max_num_nodes = 1000, name = 'ENZYMES',
         G_sub = G.subgraph(nodes)
         if graph_labels:
             G_sub.graph['label'] = data_graph_labels[i]
-        # print('nodes', G_sub.number_of_nodes())
-        # print('edges', G_sub.number_of_edges())
-        # print('label', G_sub.graph)
         if G_sub.number_of_nodes()>=min_num_nodes and G_sub.number_of_nodes()<=max_num_nodes:
+
             graphs.append(G_sub)
             if G_sub.number_of_nodes() > max_nodes:
                 max_nodes = G_sub.number_of_nodes()
-            # print(G_sub.number_of_nodes(), 'i', i)
-    # print('Graph dataset name: {}, total graph num: {}'.format(name, len(graphs)))
-    # logging.warning('Graphs loaded, total num: {}'.format(len(graphs)))
     print('Loaded')
+
     return graphs
 
 
@@ -138,10 +130,8 @@ def Graph_load_from_g_file(filename):
         
         # Only add non-empty graphs
         if G.number_of_nodes() > 0:
-            # Relabel nodes to be 0-indexed integers if they aren't already sequential
-            # But GraphRNN usually expects 0-indexed or 1-indexed. 
-            # Let's convert to 0-indexed integers for consistency with other loaders
             G = nx.convert_node_labels_to_integers(G, first_label=0)
+
             graphs.append(G)
 
     print('Loaded {} graphs from {}'.format(len(graphs), filename))
@@ -177,9 +167,8 @@ def Graph_load(dataset = 'cora'):
     objects = []
     for i in range(len(names)):
         load = pkl.load(open("dataset/ind.{}.{}".format(dataset, names[i]), 'rb'), encoding='latin1')
-        # print('loaded')
         objects.append(load)
-        # print(load)
+
     x, tx, allx, graph = tuple(objects)
     test_idx_reorder = parse_index_file("dataset/ind.{}.test.index".format(dataset))
     test_idx_range = np.sort(test_idx_reorder)
@@ -199,28 +188,7 @@ def Graph_load(dataset = 'cora'):
     return adj, features, G
 
 
-######### code test ########
-# adj, features,G = Graph_load()
-# print(adj)
-# print(G.number_of_nodes(), G.number_of_edges())
 
-# _,_,G = Graph_load(dataset='citeseer')
-# G = max(nx.connected_component_subgraphs(G), key=len)
-# G = nx.convert_node_labels_to_integers(G)
-#
-# count = 0
-# max_node = 0
-# for i in range(G.number_of_nodes()):
-#     G_ego = nx.ego_graph(G, i, radius=3)
-#     # draw_graph(G_ego,prefix='test'+str(i))
-#     m = G_ego.number_of_nodes()
-#     if m>max_node:
-#         max_node = m
-#     if m>=50:
-#         print(i, G_ego.number_of_nodes(), G_ego.number_of_edges())
-#         count += 1
-# print('count', count)
-# print('max_node', max_node)
 
 
 
@@ -241,9 +209,8 @@ def bfs_seq(G, start_id):
             current = start.pop(0)
             neighbor = dictionary.get(current)
             if neighbor is not None:
-                #### a wrong example, should not permute here!
-                # shuffle(neighbor)
                 next = next + neighbor
+
         output = output + next
         start = next
     return output
@@ -469,6 +436,7 @@ class Graph_sequence_sampler_pytorch(torch.utils.data.Dataset):
         self.label_to_id = {l: i for i, l in enumerate(sorted(list(all_labels)))}
         self.num_node_labels = len(all_labels)
         print(f"Found {self.num_node_labels} unique node labels: {self.label_to_id}")
+
         
         # SOS token for labels
         # If 'START' exists in the dataset, use it as SOS; otherwise use a generic index
@@ -526,12 +494,7 @@ class Graph_sequence_sampler_pytorch(torch.utils.data.Dataset):
         else:
             self.max_prev_node = max_prev_node
 
-        # self.max_prev_node = max_prev_node
 
-        # # sort Graph in descending order
-        # len_batch_order = np.argsort(np.array(self.len_all))[::-1]
-        # self.len_all = [self.len_all[i] for i in len_batch_order]
-        # self.adj_all = [self.adj_all[i] for i in len_batch_order]
     def __len__(self):
         return len(self.adj_all)
     def __getitem__(self, idx):
@@ -672,10 +635,7 @@ class Graph_sequence_sampler_pytorch_nobfs(torch.utils.data.Dataset):
         x_batch[1:adj_encoded.shape[0] + 1, :] = adj_encoded
         return {'x':x_batch,'y':y_batch, 'len':len_batch}
 
-# dataset = Graph_sequence_sampler_pytorch_nobfs(graphs)
-# print(dataset[1]['x'])
-# print(dataset[1]['y'])
-# print(dataset[1]['len'])
+
 
 
 
@@ -696,19 +656,13 @@ class Graph_sequence_sampler_pytorch_canonical(torch.utils.data.Dataset):
         else:
             self.n = max_num_node
         if max_prev_node is None:
-            # print('calculating max previous node, total iteration: {}'.format(iteration))
-            # self.max_prev_node = max(self.calc_max_prev_node(iter=iteration))
-            # print('max previous node: {}'.format(self.max_prev_node))
+
             self.max_prev_node = self.n-1
         else:
             self.max_prev_node = max_prev_node
 
         # self.max_prev_node = max_prev_node
 
-        # # sort Graph in descending order
-        # len_batch_order = np.argsort(np.array(self.len_all))[::-1]
-        # self.len_all = [self.len_all[i] for i in len_batch_order]
-        # self.adj_all = [self.adj_all[i] for i in len_batch_order]
     def __len__(self):
         return len(self.adj_all)
     def __getitem__(self, idx):
@@ -718,12 +672,6 @@ class Graph_sequence_sampler_pytorch_canonical(torch.utils.data.Dataset):
         y_batch = np.zeros((self.n, self.max_prev_node))  # here zeros are padded for small graph
         # generate input x, y pairs
         len_batch = adj_copy.shape[0]
-        # adj_copy_matrix = np.asmatrix(adj_copy)
-        # G = nx.from_numpy_matrix(adj_copy_matrix)
-        # then do bfs in the permuted G
-        # start_idx = G.number_of_nodes()-1
-        # x_idx = np.array(bfs_seq(G, start_idx))
-        # adj_copy = adj_copy[np.ix_(x_idx, x_idx)]
         adj_encoded = encode_adj(adj_copy, max_prev_node=self.max_prev_node)
         # get x and y and adj
         # for small graph the rest are zero padded
@@ -770,19 +718,12 @@ class Graph_sequence_sampler_pytorch_nll(torch.utils.data.Dataset):
         else:
             self.n = max_num_node
         if max_prev_node is None:
-            # print('calculating max previous node, total iteration: {}'.format(iteration))
-            # self.max_prev_node = max(self.calc_max_prev_node(iter=iteration))
-            # print('max previous node: {}'.format(self.max_prev_node))
             self.max_prev_node = self.n-1
         else:
             self.max_prev_node = max_prev_node
 
         # self.max_prev_node = max_prev_node
 
-        # # sort Graph in descending order
-        # len_batch_order = np.argsort(np.array(self.len_all))[::-1]
-        # self.len_all = [self.len_all[i] for i in len_batch_order]
-        # self.adj_all = [self.adj_all[i] for i in len_batch_order]
     def __len__(self):
         return len(self.adj_all)
     def __getitem__(self, idx):
@@ -792,12 +733,7 @@ class Graph_sequence_sampler_pytorch_nll(torch.utils.data.Dataset):
         y_batch = np.zeros((self.n, self.max_prev_node))  # here zeros are padded for small graph
         # generate input x, y pairs
         len_batch = adj_copy.shape[0]
-        # adj_copy_matrix = np.asmatrix(adj_copy)
-        # G = nx.from_numpy_matrix(adj_copy_matrix)
-        # then do bfs in the permuted G
-        # start_idx = G.number_of_nodes()-1
-        # x_idx = np.array(bfs_seq(G, start_idx))
-        # adj_copy = adj_copy[np.ix_(x_idx, x_idx)]
+
         adj_encoded = encode_adj(adj_copy, max_prev_node=self.max_prev_node)
         # get x and y and adj
         # for small graph the rest are zero padded

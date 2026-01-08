@@ -84,13 +84,6 @@ def compute_mmd(samples1, samples2, kernel, is_hist=True, *args, **kwargs):
     if is_hist:
         samples1 = [s1 / np.sum(s1) for s1 in samples1]
         samples2 = [s2 / np.sum(s2) for s2 in samples2]
-    # print('===============================')
-    # print('s1: ', disc(samples1, samples1, kernel, *args, **kwargs))
-    # print('--------------------------')
-    # print('s2: ', disc(samples2, samples2, kernel, *args, **kwargs))
-    # print('--------------------------')
-    # print('cross: ', disc(samples1, samples2, kernel, *args, **kwargs))
-    # print('===============================')
     return disc(samples1, samples1, kernel, *args, **kwargs) + \
             disc(samples2, samples2, kernel, *args, **kwargs) - \
             2 * disc(samples1, samples2, kernel, *args, **kwargs)
@@ -102,14 +95,8 @@ def compute_emd(samples1, samples2, kernel, is_hist=True, *args, **kwargs):
     if is_hist:
         samples1 = [np.mean(samples1)]
         samples2 = [np.mean(samples2)]
-    # print('===============================')
-    # print('s1: ', disc(samples1, samples1, kernel, *args, **kwargs))
-    # print('--------------------------')
-    # print('s2: ', disc(samples2, samples2, kernel, *args, **kwargs))
-    # print('--------------------------')
-    # print('cross: ', disc(samples1, samples2, kernel, *args, **kwargs))
-    # print('===============================')
     return disc(samples1, samples2, kernel, *args, **kwargs),[samples1[0],samples2[0]]
+
 
 
 def test():
